@@ -1,4 +1,5 @@
 const std = @import("std");
+const glfw = @import("lib/mach-glfw/build.zig");
 
 pub const packages = struct 
 {
@@ -8,9 +9,11 @@ pub const packages = struct
         .source = .{ .path = "quanta/src/main.zig" },
         .dependencies = &.{},
     };
+
+    const mach_glfw = glfw.pkg;
 };
 
-pub fn build(builder: *std.build.Builder) void 
+pub fn build(builder: *std.build.Builder) !void 
 {
     const target = builder.standardTargetOptions(.{});
     const mode = builder.standardReleaseOptions();
@@ -20,6 +23,9 @@ pub fn build(builder: *std.build.Builder) void
     exe.setBuildMode(mode);
     exe.install();
     exe.addPackage(packages.quanta);
+    exe.addPackage(packages.mach_glfw);
+
+    try glfw.link(builder, exe, .{});
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(builder.getInstallStep());

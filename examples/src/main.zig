@@ -1,10 +1,22 @@
 const std = @import("std");
 const quanta = @import("quanta");
+const glfw = @import("glfw");
 
 pub fn main() !void 
 {
     std.log.debug("All your {s} are belong to us.", .{ "codebase" });
     std.log.info("1 + 1 = {}", .{ quanta.add(1, 1) });
+
+    try glfw.init(.{});
+    defer glfw.terminate();
+
+    const window = try glfw.Window.create(640, 480, "example", null, null, .{});
+    defer window.destroy();
+
+    while (!window.shouldClose())
+    {
+        try glfw.pollEvents();
+    }
 }
 
 pub fn log(
