@@ -2,6 +2,8 @@ const Context = @This();
 const builtin = @import("builtin");
 const std = @import("std");
 const vk = @import("vk.zig");
+const window = @import("../windowing.zig").window;
+const glfw = @import("glfw");
 
 pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
@@ -206,6 +208,26 @@ vkd: DeviceDispatch,
 allocation_callbacks: vk.AllocationCallbacks,
 instance: vk.Instance,
 device: vk.Device,
+physical_device: vk.PhysicalDevice,
+physical_device_properties: vk.PhysicalDeviceProperties,
+physical_device_features: vk.PhysicalDeviceFeatures,
+physical_device_memory_properties: vk.PhysicalDeviceMemoryProperties,
+surface: vk.SurfaceKHR,
+surface_capabilities: vk.SurfaceCapabilitiesKHR,
+surface_format: vk.SurfaceFormatKHR,
+surface_present_mode: vk.PresentModeKHR,
+graphics_family_index: ?u32,
+present_family_index: ?u32,
+compute_family_index: ?u32,
+transfer_family_index: ?u32,
+graphics_queue: vk.Queue,
+present_queue: vk.Queue,
+compute_queue: vk.Queue,
+transfer_queue: vk.Queue,
+graphics_command_pool: vk.CommandPool,
+present_command_pool: vk.CommandPool,
+compute_command_pool: vk.CommandPool,
+transfer_command_pool: vk.CommandPool,
 debug_messenger: if (enable_debug_messenger) vk.DebugUtilsMessengerEXT else void,
 
 pub fn init(self: *Context, allocator: std.mem.Allocator) !void 
@@ -355,6 +377,354 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
         self.debug_messenger, 
         &self.allocation_callbacks
     );
+
+    _ = try glfw.createWindowSurface(self.instance, window.window, @ptrCast(?*vk.AllocationCallbacks, &self.allocation_callbacks), &self.surface);
+    errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, &self.allocation_callbacks);
+
+    const device_extentions = [_][*:0]const u8 
+    { 
+        vk.extension_info.khr_swapchain.name,
+    };
+
+    const device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
+    {
+        .dynamic_rendering = vk.TRUE, 
+        .synchronization_2 = vk.TRUE,
+    };
+
+    std.log.info("Required device extensions: {s}", .{ device_extentions });
+    std.log.info("Required device features:", .{});
+
+    inline for ((comptime std.meta.fieldNames(@TypeOf(device_vulkan13_features))[2..])) |feature_name|
+    {
+        if (@field(device_vulkan13_features, feature_name) == vk.TRUE)
+        {
+            std.log.info("  {s}", .{ feature_name });
+        }
+    }
+
+    //Find physical device
+    {
+        var physical_device_count: u32 = 0;
+
+        _ = try self.vki.enumeratePhysicalDevices(self.instance, &physical_device_count, null);
+
+        const physical_devices = try self.allocator.alloc(vk.PhysicalDevice, physical_device_count);
+        defer self.allocator.free(physical_devices);
+
+        _ = try self.vki.enumeratePhysicalDevices(self.instance, &physical_device_count, physical_devices.ptr);
+
+        var found_suitable_device = false;
+
+        std.log.info("Available devices:", .{});
+
+        for (physical_devices) |physical_device, i|
+        {
+            const properties = self.vki.getPhysicalDeviceProperties(physical_device);
+
+            std.log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
+                i, 
+                properties.device_name, 
+                vk.apiVersionMajor(properties.api_version), 
+                vk.apiVersionMinor(properties.api_version), 
+                vk.apiVersionPatch(properties.api_version), 
+                vk.apiVersionVariant(properties.api_version), 
+            });
+        }
+
+        for (physical_devices) |physical_device, i|
+        {
+            self.physical_device_properties = self.vki.getPhysicalDeviceProperties(physical_device);
+            self.physical_device_features = self.vki.getPhysicalDeviceFeatures(physical_device);
+
+            std.log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
+                i, 
+                self.physical_device_properties.device_name, 
+                vk.apiVersionMajor(self.physical_device_properties.api_version), 
+                vk.apiVersionMinor(self.physical_device_properties.api_version), 
+                vk.apiVersionPatch(self.physical_device_properties.api_version), 
+                vk.apiVersionVariant(self.physical_device_properties.api_version), 
+            });
+
+            if (
+                vk.apiVersionMajor(self.physical_device_properties.api_version) != vulkan_version.major or
+                vk.apiVersionMinor(self.physical_device_properties.api_version) != vulkan_version.minor
+                )
+            {
+                continue;
+            }
+
+            var queue_family_count: u32 = 0;
+
+            self.vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, null);
+
+            const queue_families = try self.allocator.alloc(vk.QueueFamilyProperties, queue_family_count);
+            defer self.allocator.free(queue_families);
+
+            self.vki.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.ptr);
+
+            for (queue_families) |queue_family, queue_family_index|
+            {
+                if (queue_family.queue_flags.graphics_bit)
+                {
+                    self.graphics_family_index = @intCast(u32, queue_family_index);
+                }
+
+                if (queue_family.queue_flags.compute_bit)
+                {
+                    self.compute_family_index = @intCast(u32, queue_family_index);
+                }
+
+                if (queue_family.queue_flags.transfer_bit)
+                {
+                    self.transfer_family_index = @intCast(u32, queue_family_index);
+                }
+
+                const surface_supported = try self.vki.getPhysicalDeviceSurfaceSupportKHR(
+                    physical_device,
+                    @intCast(u32, queue_family_index),
+                    self.surface
+                );
+
+                if (surface_supported == vk.TRUE)
+                {
+                    self.present_family_index = @intCast(u32, queue_family_index);
+                }
+            }
+
+            var physical_device_extention_count: u32 = undefined;
+
+            _ = try self.vki.enumerateDeviceExtensionProperties(physical_device, null, &physical_device_extention_count, null);
+
+            const physical_device_extentions = try self.allocator.alloc(vk.ExtensionProperties, physical_device_extention_count);
+            defer self.allocator.free(physical_device_extentions);
+
+            _ = try self.vki.enumerateDeviceExtensionProperties(physical_device, null, &physical_device_extention_count, physical_device_extentions.ptr);
+
+            const supports_extentions = block: inline for (device_extentions) |required_extention|
+            {
+                for (physical_device_extentions) |physical_device_extention|
+                {                    
+                    const sentinel_index = std.mem.indexOfSentinel(u8, 0, required_extention);
+
+                    if (std.mem.eql(u8, physical_device_extention.extension_name[0..sentinel_index], required_extention[0..sentinel_index]))
+                    {
+                        break: block true;
+                    }
+                } else
+                {
+                    std.log.info("Device {s} doesn't support required extention {s}", .{ self.physical_device_properties.device_name, required_extention });
+
+                    break: block false;
+                }
+            } else false;
+
+            std.log.info("  supports_swapchain: {}", .{ supports_extentions });
+
+            self.physical_device_memory_properties = self.vki.getPhysicalDeviceMemoryProperties(physical_device);
+            self.surface_capabilities = try self.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, self.surface);
+
+            var surface_format_count: u32 = 0;
+
+            _ = try self.vki.getPhysicalDeviceSurfaceFormatsKHR(physical_device, self.surface, &surface_format_count, null);
+
+            const surface_formats = try self.allocator.alloc(vk.SurfaceFormatKHR, surface_format_count);
+            defer self.allocator.free(surface_formats);
+
+            _ = try self.vki.getPhysicalDeviceSurfaceFormatsKHR(physical_device, self.surface, &surface_format_count, surface_formats.ptr);
+
+            var surface_present_mode_count: u32 = 0;
+
+            _ = try self.vki.getPhysicalDeviceSurfacePresentModesKHR(physical_device, self.surface, &surface_present_mode_count, null);
+
+            const surface_present_modes = try self.allocator.alloc(vk.PresentModeKHR, surface_present_mode_count);
+            defer self.allocator.free(surface_present_modes);
+
+            _ = try self.vki.getPhysicalDeviceSurfacePresentModesKHR(physical_device, self.surface, &surface_present_mode_count, surface_present_modes.ptr);
+
+            if (surface_formats.len == 0 or surface_present_modes.len == 0)
+            {
+                continue;
+            }
+
+            for (surface_formats) |surface_format|
+            {
+                if (surface_format.format == .b8g8r8a8_srgb and surface_format.color_space == .srgb_nonlinear_khr)
+                {
+                    self.surface_format = surface_format;
+
+                    break;
+                }
+            }
+
+            for (surface_present_modes) |surface_present_mode|
+            {
+                std.log.info("  surface_present_mode: {}", .{ surface_present_mode });
+
+                if (surface_present_mode == .mailbox_khr or surface_present_mode == .fifo_khr)
+                {
+                    self.surface_present_mode = surface_present_mode;
+
+                    break;
+                }
+            }
+
+            if (
+                self.physical_device_properties.device_type == .discrete_gpu and
+                self.physical_device_features.geometry_shader == 1 and
+                self.graphics_family_index != null and
+                self.present_family_index != null and
+                supports_extentions
+            )
+            {
+                self.physical_device = physical_device;
+                found_suitable_device = true;
+
+                break;
+            }
+        }
+
+        if (!found_suitable_device)
+        {
+            return error.FailedToFindSuitableDevice;
+        }
+    }
+
+    //Create queue command pools
+    {
+        const shared_compute_queue = self.present_family_index.? == self.compute_family_index.? and self.compute_family_index.? == self.transfer_family_index.?;
+        
+        //TODO: massive hack for NV GTX 1650, not general solution
+        const queue_count = if (shared_compute_queue)
+            @intCast(usize, @boolToInt(self.graphics_family_index != null)) + 1
+        else
+            @intCast(usize, @boolToInt(self.graphics_family_index != null)) + 
+            @intCast(usize, @boolToInt(self.present_family_index != null)) + 
+            @intCast(usize, @boolToInt(self.compute_family_index != null)) + 
+            @intCast(usize, @boolToInt(self.transfer_family_index != null));
+
+        const queue_create_infos = try self.allocator.alloc(vk.DeviceQueueCreateInfo, queue_count);
+        defer self.allocator.free(queue_create_infos);
+
+        {
+            var i: usize = 0;
+
+            std.log.info("self.graphics_family_index = {?}", .{ self.graphics_family_index });
+            std.log.info("self.present_family_index = {?}", .{ self.present_family_index });
+            std.log.info("self.compute_family_index = {?}", .{ self.compute_family_index });
+            std.log.info("self.transfer_family_index = {?}", .{ self.transfer_family_index });
+
+            if (self.graphics_family_index) |index|
+            {
+                queue_create_infos[i] = .{
+                    .flags = .{},
+                    .queue_family_index = index,
+                    .queue_count = 1,
+                    .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1.0)),
+                };
+
+                i += 1;
+            }
+
+            if (shared_compute_queue)
+            {
+                queue_create_infos[i] = .{
+                    .flags = .{},
+                    .queue_family_index = self.compute_family_index.?,
+                    .queue_count = 1,
+                    .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
+                };
+            }
+            else
+            {
+                if (self.present_family_index) |index|
+                {
+                    queue_create_infos[i] = .{
+                        .flags = .{},
+                        .queue_family_index = index,
+                        .queue_count = 1,
+                        .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
+                    };
+
+                    i += 1;
+                }
+
+                if (self.compute_family_index) |index|
+                {
+                    queue_create_infos[i] = .{
+                        .flags = .{},
+                        .queue_family_index = index,
+                        .queue_count = 1,
+                        .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
+                    };
+
+                    i += 1;
+                }
+
+                if (self.transfer_family_index) |index|
+                {
+                    queue_create_infos[i] = .{
+                        .flags = .{},
+                        .queue_family_index = index,
+                        .queue_count = 1,
+                        .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
+                    };
+                }
+            }
+        }
+
+        self.device = try self.vki.createDevice(self.physical_device, &.{
+            .p_next = &device_vulkan13_features,
+            .flags = .{},
+            .p_queue_create_infos = queue_create_infos.ptr,
+            .queue_create_info_count = @intCast(u32, queue_create_infos.len),
+            .p_enabled_features = null,
+            .enabled_extension_count = device_extentions.len,
+            .pp_enabled_extension_names = &device_extentions,
+            .enabled_layer_count = 0,
+            .pp_enabled_layer_names = undefined,
+        }, &self.allocation_callbacks);
+
+        self.vkd = try DeviceDispatch.load(self.device, self.vki.dispatch.vkGetDeviceProcAddr);
+
+        errdefer self.vkd.destroyDevice(self.device, &self.allocation_callbacks);
+
+        if (self.graphics_family_index) |index|
+        {
+            self.graphics_queue = self.vkd.getDeviceQueue(self.device, index, 0);
+            self.graphics_command_pool = try self.vkd.createCommandPool(self.device, &.{
+                .flags = .{ .reset_command_buffer_bit = true },
+                .queue_family_index = index,
+            }, &self.allocation_callbacks);
+        }
+
+        if (self.present_family_index) |index|
+        {
+            self.present_queue = self.vkd.getDeviceQueue(self.device, index, 0);
+            self.present_command_pool = try self.vkd.createCommandPool(self.device, &.{
+                .flags = .{ .reset_command_buffer_bit = true },
+                .queue_family_index = index,
+            }, &self.allocation_callbacks);
+        }
+
+        if (self.compute_family_index) |index|
+        {
+            self.compute_queue = self.vkd.getDeviceQueue(self.device, index, 0);
+            self.compute_command_pool = try self.vkd.createCommandPool(self.device, &.{
+                .flags = .{ .reset_command_buffer_bit = true },
+                .queue_family_index = index,
+            }, &self.allocation_callbacks);
+        }
+
+        if (self.transfer_family_index) |index|
+        {
+            self.transfer_queue = self.vkd.getDeviceQueue(self.device, index, 0);
+            self.transfer_command_pool = try self.vkd.createCommandPool(self.device, &.{
+                .flags = .{ .reset_command_buffer_bit = true },
+                .queue_family_index = index,
+            }, &self.allocation_callbacks);
+        }
+    }   
 }
 
 pub fn deinit(self: *Context) void 
@@ -367,4 +737,10 @@ pub fn deinit(self: *Context) void
         self.debug_messenger, 
         &self.allocation_callbacks
     );
+    defer self.vki.destroySurfaceKHR(self.instance, self.surface, &self.allocation_callbacks);
+    defer self.vkd.destroyDevice(self.device, &self.allocation_callbacks);
+    defer if (self.graphics_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.graphics_command_pool, &self.allocation_callbacks);
+    defer if (self.present_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.present_command_pool, &self.allocation_callbacks);
+    defer if (self.compute_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.compute_command_pool, &self.allocation_callbacks);
+    defer if (self.transfer_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.transfer_command_pool, &self.allocation_callbacks);
 }
