@@ -11,10 +11,17 @@ pub fn main() !void
     std.log.warn("{s}", .{ "warn" });
     std.log.err("{s}", .{ "err" });
 
+    var gpa = std.heap.GeneralPurposeAllocator(.{}) {};
+    defer std.debug.assert(!gpa.deinit());
+
+    const allocator = gpa.allocator();
+
     try window.init(640, 480, "example");
     defer window.deinit();
 
-    var graphics_context = try GraphicsContext.init();
+    var graphics_context: GraphicsContext = undefined;
+
+    try graphics_context.init(allocator);
     defer graphics_context.deinit();
 
     while (!window.shouldClose())
