@@ -3,6 +3,7 @@ const quanta = @import("quanta");
 const windowing = quanta.windowing;
 const window = quanta.windowing.window;
 const GraphicsContext = quanta.graphics.Context;
+const Swapchain = quanta.graphics.Swapchain;
 
 pub fn main() !void 
 {
@@ -23,6 +24,9 @@ pub fn main() !void
 
     try graphics_context.init(allocator);
     defer graphics_context.deinit();
+
+    var swapchain = try Swapchain.init(&graphics_context, allocator, .{ .width = 640, .height = 480 });
+    defer swapchain.deinit();
 
     while (!window.shouldClose())
     {
