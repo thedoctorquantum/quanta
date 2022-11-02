@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const vkgen = @import("lib/vulkan-zig/generator/index.zig");
 const glfw = @import("lib/mach-glfw/build.zig");
 
 pub fn build(builder: *std.build.Builder) !void 
@@ -15,12 +16,15 @@ pub fn build(builder: *std.build.Builder) !void
         exe.install();
 
         {
+            const gen = vkgen.VkGenerateStep.init(builder, "quanta/src/graphics/vk.xml", "vk.zig");
+
             var package = std.build.Pkg 
             {
                 .name = "quanta",
                 .source = .{ .path = "quanta/src/main.zig" },
                 .dependencies = &.{
-                    glfw.pkg
+                    glfw.pkg,
+                    gen.package
                 },
             };
 

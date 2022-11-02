@@ -1,3 +1,6 @@
 [submodule "lib/mach-glfw"]
 	path = lib/mach-glfw
 	url = https://github.com/hexops/mach-glfw.git
+[submodule "lib/vulkan-zig"]
+	path = lib/vulkan-zig
+	url = https://github.com/Snektron/vulkan-zig.git

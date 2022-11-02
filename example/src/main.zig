@@ -2,6 +2,7 @@ const std = @import("std");
 const quanta = @import("quanta");
 const windowing = quanta.windowing;
 const window = quanta.windowing.window;
+const GraphicsContext = quanta.graphics.Context;
 
 pub fn main() !void 
 {
@@ -12,6 +13,9 @@ pub fn main() !void
 
     try window.init(640, 480, "example");
     defer window.deinit();
+
+    var graphics_context = try GraphicsContext.init();
+    defer graphics_context.deinit();
 
     while (!window.shouldClose())
     {
