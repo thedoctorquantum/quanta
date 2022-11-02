@@ -6,6 +6,9 @@ pub fn main() !void
 {
     std.log.debug("All your {s} are belong to us.", .{ "codebase" });
     std.log.info("1 + 1 = {}", .{ quanta.add(1, 1) });
+    std.log.debug("{s}", .{ "debug" });
+    std.log.warn("{s}", .{ "warn" });
+    std.log.err("{s}", .{ "err" });
 
     try glfw.init(.{});
     defer glfw.terminate();
@@ -26,12 +29,17 @@ pub fn log(
     args: anytype,
 ) void 
 {
+    const terminal_red = "\x1B[31m";
+    const terminal_yellow = "\x1B[33m";
+    const terminal_blue = "\x1B[34m";
+    const terminal_green = "\x1B[32m";
+
     const color_begin = switch (message_level)
     {
-        .err => "\x1B[31m",
-        .warn => "\x1B[33m",
-        .info => "\x1B[34m",
-        .debug => "\x1B[32m",
+        .err => terminal_red,
+        .warn => terminal_yellow,
+        .info => terminal_blue,
+        .debug => terminal_green,
     };
 
     const color_end = "\x1B[0;39m";
