@@ -1,24 +1,21 @@
 const std = @import("std");
 const quanta = @import("quanta");
-const glfw = @import("glfw");
+const windowing = quanta.windowing;
+const window = quanta.windowing.window;
 
 pub fn main() !void 
 {
     std.log.debug("All your {s} are belong to us.", .{ "codebase" });
-    std.log.info("1 + 1 = {}", .{ quanta.add(1, 1) });
     std.log.debug("{s}", .{ "debug" });
     std.log.warn("{s}", .{ "warn" });
     std.log.err("{s}", .{ "err" });
 
-    try glfw.init(.{});
-    defer glfw.terminate();
-
-    const window = try glfw.Window.create(640, 480, "example", null, null, .{});
-    defer window.destroy();
+    try window.init(640, 480, "example");
+    defer window.deinit();
 
     while (!window.shouldClose())
     {
-        try glfw.pollEvents();
+        
     }
 }
 
