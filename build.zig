@@ -1,5 +1,15 @@
 const std = @import("std");
 
+pub const packages = struct 
+{
+    const quanta = std.build.Pkg 
+    {
+        .name = "quanta",
+        .source = .{ .path = "quanta/src/main.zig" },
+        .dependencies = &.{},
+    };
+};
+
 pub fn build(builder: *std.build.Builder) void 
 {
     const target = builder.standardTargetOptions(.{});
@@ -9,6 +19,7 @@ pub fn build(builder: *std.build.Builder) void
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
+    exe.addPackage(packages.quanta);
 
     const run_cmd = exe.run();
     run_cmd.step.dependOn(builder.getInstallStep());

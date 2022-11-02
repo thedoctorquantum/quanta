@@ -1,24 +1,33 @@
 const std = @import("std");
+const quanta = @import("quanta");
 
-pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // don't forget to flush!
+pub fn main() !void 
+{
+    std.log.debug("All your {s} are belong to us.", .{ "codebase" });
+    std.log.info("1 + 1 = {}", .{ quanta.add(1, 1) });
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+pub fn log(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void 
+{
+    const color_begin = switch (message_level)
+    {
+        .err => "\x1B[31m",
+        .warn => "\x1B[33m",
+        .info => "\x1B[34m",
+        .debug => "\x1B[32m",
+    };
+
+    const color_end = "\x1B[0;39m";
+
+    const level_txt = "[" ++ color_begin ++ comptime message_level.asText() ++ color_end ++ "]";
+    const prefix2 = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+    const stderr = std.io.getStdErr().writer();
+    std.debug.getStderrMutex().lock();
+    defer std.debug.getStderrMutex().unlock();
+    nosuspend stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
 }
