@@ -18,7 +18,7 @@ pub fn build(builder: *std.build.Builder) !void
     const target = builder.standardTargetOptions(.{});
     const mode = builder.standardReleaseOptions();
 
-    const exe = builder.addExecutable("examples", "examples/src/main.zig");
+    const exe = builder.addExecutable("example", "example/src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.install();
@@ -38,7 +38,7 @@ pub fn build(builder: *std.build.Builder) !void
     const run_step = builder.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    const exe_tests = builder.addTest("examples/src/main.zig");
+    const exe_tests = builder.addTest("example/src/main.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
 
