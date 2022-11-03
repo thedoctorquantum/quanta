@@ -39,11 +39,13 @@ pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.
         image_count = std.math.min(image_count, caps.max_image_count);
     }
 
-    const qfi = [_]u32{ gc.graphics_family_index.?, gc.graphics_family_index.? };
-    const sharing_mode: vk.SharingMode = if (gc.graphics_family_index.? != gc.graphics_family_index.?)
+    const qfi = [_]u32{ gc.graphics_family_index.?, gc.present_family_index.? };
+    const sharing_mode: vk.SharingMode = if (gc.graphics_family_index.? != gc.present_family_index.?)
         .concurrent
     else
         .exclusive;
+
+    std.log.info("swapchain image sharing mode: {}", .{ sharing_mode });
 
     const handle = try gc.vkd.createSwapchainKHR(gc.device, &.{
         .flags = .{},
@@ -146,12 +148,12 @@ pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
 
     // Step 1: Make sure the current frame has finished rendering
     const current = self.currentSwapImage();
-    try current.waitForFence(self.gc);
-    try self.gc.vkd.resetFences(self.gc.dev, 1, @ptrCast([*]const vk.Fence, &current.frame_fence));
+    try current.waitForFence(self.context);
+    try self.context.vkd.resetFences(self.context.device, 1, @ptrCast([*]const vk.Fence, &current.frame_fence));
 
     // Step 2: Submit the command buffer
     const wait_stage = [_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }};
-    try self.gc.vkd.queueSubmit(self.gc.graphics_queue.handle, 1, &[_]vk.SubmitInfo{.{
+    try self.context.vkd.queueSubmit(self.context.graphics_queue, 1, &[_]vk.SubmitInfo{.{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &current.image_acquired),
         .p_wait_dst_stage_mask = &wait_stage,
@@ -162,7 +164,7 @@ pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
     }}, current.frame_fence);
 
     // Step 3: Present the current frame
-    _ = try self.gc.vkd.queuePresentKHR(self.gc.present_queue.handle, &.{
+    _ = try self.context.vkd.queuePresentKHR(self.context.present_queue, &.{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &current.render_finished),
         .swapchain_count = 1,
@@ -172,8 +174,8 @@ pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
     });
 
     // Step 4: Acquire next frame
-    const result = try self.gc.vkd.acquireNextImageKHR(
-        self.gc.dev,
+    const result = try self.context.vkd.acquireNextImageKHR(
+        self.context.device,
         self.handle,
         std.math.maxInt(u64),
         self.next_image_acquired,

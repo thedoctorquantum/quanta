@@ -109,6 +109,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .freeDescriptorSets = true,
     .createDescriptorPool = true,
     .updateDescriptorSets = true,
+    .cmdPipelineBarrier2 = true,
 });
 
 var vkGetInstanceProcAddr: vk.PfnGetInstanceProcAddr = undefined;
@@ -130,7 +131,10 @@ fn debugUtilsMessengerCallback(
 
     if (message_severity.error_bit_ext)
     {
-        std.debug.panic("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        
+        // std.debug.panic("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        // std.log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        std.debug.print("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
     }
     else
     {
@@ -280,6 +284,7 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
     if (enable_khronos_validation)
     {
         requested_layers = requested_layers ++ &[_][*:0]const u8 { "VK_LAYER_KHRONOS_validation" }; 
+        requested_layers = requested_layers ++ &[_][*:0]const u8 { "VK_LAYER_KHRONOS_synchronization2" }; 
     }
 
     std.log.info("layers: {s}", .{ requested_layers });
@@ -729,6 +734,8 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
 
 pub fn deinit(self: *Context) void 
 {
+    self.vkd.deviceWaitIdle(self.device) catch unreachable;
+
     defer self.* = undefined;
     defer self.vulkan_loader.close();
     defer self.vki.destroyInstance(self.instance, &self.allocation_callbacks);
@@ -743,4 +750,48 @@ pub fn deinit(self: *Context) void
     defer if (self.present_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.present_command_pool, &self.allocation_callbacks);
     defer if (self.compute_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.compute_command_pool, &self.allocation_callbacks);
     defer if (self.transfer_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.transfer_command_pool, &self.allocation_callbacks);
+}
+
+pub fn imageMemoryBarrier(
+    self: *Context, 
+    command_buffer: vk.CommandBuffer, 
+    image: vk.Image,
+    src_stage: vk.PipelineStageFlags2,
+    dst_stage: vk.PipelineStageFlags2,
+    src_access: vk.AccessFlags2,
+    dst_access: vk.AccessFlags2,
+    old_layout: vk.ImageLayout,
+    new_layout: vk.ImageLayout,
+    ) void 
+{   
+    self.vkd.cmdPipelineBarrier2(
+        command_buffer, 
+        &.{
+            .dependency_flags = .{},
+            .memory_barrier_count = 0,
+            .p_memory_barriers = undefined,
+            .buffer_memory_barrier_count = 0,
+            .p_buffer_memory_barriers = undefined,
+            .image_memory_barrier_count = 1,
+            .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+            {
+                .src_stage_mask = src_stage,
+                .dst_stage_mask = dst_stage,
+                .src_access_mask = src_access,
+                .dst_access_mask = dst_access,
+                .old_layout = old_layout,
+                .new_layout = new_layout,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = image,
+                .subresource_range = .{
+                    .aspect_mask = .{ .color_bit = true },
+                    .base_mip_level = 0,
+                    .level_count = vk.REMAINING_MIP_LEVELS,
+                    .base_array_layer = 0,
+                    .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                },
+            }),
+        }
+    );
 }
