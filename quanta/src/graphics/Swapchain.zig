@@ -3,28 +3,29 @@ const std = @import("std");
 const vk = @import("vk.zig");
 const Context = @import("Context.zig");
 
-pub const PresentState = enum {
+pub const PresentState = enum 
+{
     optimal,
     suboptimal,
 };
 
 context: *const Context,
 allocator: std.mem.Allocator,
-
 surface_format: vk.SurfaceFormatKHR,
 present_mode: vk.PresentModeKHR,
 extent: vk.Extent2D,
 handle: vk.SwapchainKHR,
-
 swap_images: []SwapImage,
 image_index: u32,
 next_image_acquired: vk.Semaphore,
 
-pub fn init(gc: *const Context, allocator: std.mem.Allocator, extent: vk.Extent2D) !Swapchain {
+pub fn init(gc: *const Context, allocator: std.mem.Allocator, extent: vk.Extent2D) !Swapchain 
+{
     return try initRecycle(gc, allocator, extent, .null_handle);
 }
 
-pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.Extent2D, old_handle: vk.SwapchainKHR) !Swapchain {
+pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.Extent2D, old_handle: vk.SwapchainKHR) !Swapchain 
+{
     const caps = try gc.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(gc.physical_device, gc.surface);
     const actual_extent = findActualExtent(caps, extent);
     if (actual_extent.width == 0 or actual_extent.height == 0) {
@@ -84,7 +85,9 @@ pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.
     }
 
     std.mem.swap(vk.Semaphore, &swap_images[result.image_index].image_acquired, &next_image_acquired);
-    return Swapchain{
+    
+    return Swapchain
+    {
         .context = gc,
         .allocator = allocator,
         .surface_format = surface_format,
@@ -97,22 +100,26 @@ pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.
     };
 }
 
-fn deinitExceptSwapchain(self: Swapchain) void {
+fn deinitExceptSwapchain(self: Swapchain) void 
+{
     for (self.swap_images) |si| si.deinit(self.context);
     self.context.vkd.destroySemaphore(self.context.device, self.next_image_acquired, null);
 }
 
-pub fn waitForAllFences(self: Swapchain) !void {
+pub fn waitForAllFences(self: Swapchain) !void 
+{
     for (self.swap_images) |si| si.waitForFence(self.context) catch {};
 }
 
-pub fn deinit(self: Swapchain) void {
+pub fn deinit(self: Swapchain) void 
+{
     self.deinitExceptSwapchain();
     self.context.vkd.destroySwapchainKHR(self.context.device, self.handle, null);
     self.allocator.free(self.swap_images);
 }
 
-pub fn recreate(self: *Swapchain, new_extent: vk.Extent2D) !void {
+pub fn recreate(self: *Swapchain, new_extent: vk.Extent2D) !void 
+{
     const gc = self.context;
     const allocator = self.allocator;
     const old_handle = self.handle;
@@ -120,15 +127,18 @@ pub fn recreate(self: *Swapchain, new_extent: vk.Extent2D) !void {
     self.* = try initRecycle(gc, allocator, new_extent, old_handle);
 }
 
-pub fn currentImage(self: Swapchain) vk.Image {
+pub fn currentImage(self: Swapchain) vk.Image 
+{
     return self.swap_images[self.image_index].image;
 }
 
-pub fn currentSwapImage(self: Swapchain) *const SwapImage {
+pub fn currentSwapImage(self: Swapchain) *const SwapImage 
+{
     return &self.swap_images[self.image_index];
 }
 
-pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
+pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState 
+{
     // Simple method:
     // 1) Acquire next image
     // 2) Wait for and reset fence of the acquired image
@@ -148,8 +158,8 @@ pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
 
     // Step 1: Make sure the current frame has finished rendering
     const current = self.currentSwapImage();
-    try current.waitForFence(self.context);
-    try self.context.vkd.resetFences(self.context.device, 1, @ptrCast([*]const vk.Fence, &current.frame_fence));
+    // try current.waitForFence(self.context);
+    // try self.context.vkd.resetFences(self.context.device, 1, @ptrCast([*]const vk.Fence, &current.frame_fence));
 
     // Step 2: Submit the command buffer
     const wait_stage = [_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }};
@@ -173,26 +183,16 @@ pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState {
         .p_results = null,
     });
 
-    // Step 4: Acquire next frame
-    const result = try self.context.vkd.acquireNextImageKHR(
-        self.context.device,
-        self.handle,
-        std.math.maxInt(u64),
-        self.next_image_acquired,
-        .null_handle,
-    );
+    return .optimal;
 
-    std.mem.swap(vk.Semaphore, &self.swap_images[result.image_index].image_acquired, &self.next_image_acquired);
-    self.image_index = result.image_index;
-
-    return switch (result.result) {
-        .success => .optimal,
-        .suboptimal_khr => .suboptimal,
-        else => unreachable,
-    };
+    //return switch (result.result) {
+    //    .success => .optimal,
+    //    .suboptimal_khr => .suboptimal,
+    //    else => unreachable,
+    //};
 }
 
-const SwapImage = struct 
+pub const SwapImage = struct 
 {
     image: vk.Image,
     view: vk.ImageView,
@@ -226,7 +226,8 @@ const SwapImage = struct
         const frame_fence = try gc.vkd.createFence(gc.device, &.{ .flags = .{ .signaled_bit = true } }, null);
         errdefer gc.vkd.destroyFence(gc.device, frame_fence, null);
 
-        return SwapImage{
+        return SwapImage
+        {
             .image = image,
             .view = view,
             .image_acquired = image_acquired,
@@ -235,7 +236,8 @@ const SwapImage = struct
         };
     }
 
-    fn deinit(self: SwapImage, gc: *const Context) void {
+    fn deinit(self: SwapImage, gc: *const Context) void 
+    {
         self.waitForFence(gc) catch return;
         gc.vkd.destroyImageView(gc.device, self.view, null);
         gc.vkd.destroySemaphore(gc.device, self.image_acquired, null);
@@ -243,7 +245,8 @@ const SwapImage = struct
         gc.vkd.destroyFence(gc.device, self.frame_fence, null);
     }
 
-    fn waitForFence(self: SwapImage, gc: *const Context) !void {
+    pub fn waitForFence(self: SwapImage, gc: *const Context) !void 
+    {
         _ = try gc.vkd.waitForFences(gc.device, 1, @ptrCast([*]const vk.Fence, &self.frame_fence), vk.TRUE, std.math.maxInt(u64));
     }
 };

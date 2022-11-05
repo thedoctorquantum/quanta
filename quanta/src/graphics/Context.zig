@@ -7,7 +7,7 @@ const glfw = @import("glfw");
 
 pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
-pub const enable_mangohud = builtin.mode == .Debug;
+pub const enable_mangohud = builtin.mode == .Debug or true;
 pub const vulkan_version = std.builtin.Version { .major = 1, .minor = 3, .patch = 0, };
 
 pub const BaseDispatch = vk.BaseWrapper(.{
@@ -52,7 +52,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .deviceWaitIdle = true,
     .waitForFences = true,
     .resetFences = true,
-    .queueSubmit = true,
+    .queueSubmit2 = true,
     .queuePresentKHR = true,
     .createCommandPool = true,
     .destroyCommandPool = true,
@@ -102,7 +102,6 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .destroyPipelineCache = true,
     .cmdBeginRendering = true,
     .cmdEndRendering = true,
-    .cmdPipelineBarrier = true,
     .cmdDispatch = true,
     .cmdBindDescriptorSets = true,
     .allocateDescriptorSets = true,
@@ -131,10 +130,8 @@ fn debugUtilsMessengerCallback(
 
     if (message_severity.error_bit_ext)
     {
-        
-        // std.debug.panic("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
-        // std.log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
-        std.debug.print("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        std.log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        std.os.exit(0);
     }
     else
     {
@@ -260,7 +257,7 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
     };
 
     self.vkb = try BaseDispatch.load(getInstanceProcAddress);
-
+    
     comptime var instance_extentions: []const [*:0]const u8 = &.{};
 
     if (enable_debug_messenger)
