@@ -35,9 +35,6 @@ pub fn main() !void
     const cmdbufs = try allocator.alloc(vk.CommandBuffer, swapchain.swap_images.len);
     defer allocator.free(cmdbufs);
 
-    const present_command_bufs = try allocator.alloc(vk.CommandBuffer, swapchain.swap_images.len);
-    defer allocator.free(present_command_bufs);
-
     try graphics_context.vkd.allocateCommandBuffers(graphics_context.device, &.{
         .command_pool = graphics_context.graphics_command_pool,
         .level = .primary,
@@ -68,7 +65,8 @@ pub fn main() !void
                 .max_depth = 1,
             };
 
-            const scissor = vk.Rect2D{
+            const scissor = vk.Rect2D
+            {
                 .offset = .{ .x = 0, .y = 0 },
                 .extent = .{ .width = 640, .height = 480 },
             };

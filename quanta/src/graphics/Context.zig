@@ -576,6 +576,8 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
                 self.physical_device_features.geometry_shader == 1 and
                 self.graphics_family_index != null and
                 self.present_family_index != null and
+                self.compute_family_index != null and
+                self.transfer_family_index != null and
                 supports_extentions
             )
             {
@@ -594,91 +596,31 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
 
     //Create queue command pools
     {
-        const shared_compute_queue = self.present_family_index.? == self.compute_family_index.? and self.compute_family_index.? == self.transfer_family_index.?;
-        
-        //TODO: massive hack for NV GTX 1650, not general solution
-        const queue_count = if (shared_compute_queue)
-            @intCast(usize, @boolToInt(self.graphics_family_index != null)) + 1
-        else
-            @intCast(usize, @boolToInt(self.graphics_family_index != null)) + 
-            @intCast(usize, @boolToInt(self.present_family_index != null)) + 
-            @intCast(usize, @boolToInt(self.compute_family_index != null)) + 
-            @intCast(usize, @boolToInt(self.transfer_family_index != null));
-
-        const queue_create_infos = try self.allocator.alloc(vk.DeviceQueueCreateInfo, queue_count);
-        defer self.allocator.free(queue_create_infos);
-
+        const queue_create_infos = [_]vk.DeviceQueueCreateInfo
         {
-            var i: usize = 0;
+            .{
+                .flags = .{},
+                .queue_family_index = self.graphics_family_index.?,
+                .queue_count = 1,
+                .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1.0)),
+            },
+            .{
+                .flags = .{},
+                .queue_family_index = self.compute_family_index.?,
+                .queue_count = 1,
+                .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1.0)),
+            },
+        };
 
-            std.log.info("self.graphics_family_index = {?}", .{ self.graphics_family_index });
-            std.log.info("self.present_family_index = {?}", .{ self.present_family_index });
-            std.log.info("self.compute_family_index = {?}", .{ self.compute_family_index });
-            std.log.info("self.transfer_family_index = {?}", .{ self.transfer_family_index });
-
-            if (self.graphics_family_index) |index|
-            {
-                queue_create_infos[i] = .{
-                    .flags = .{},
-                    .queue_family_index = index,
-                    .queue_count = 1,
-                    .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1.0)),
-                };
-
-                i += 1;
-            }
-
-            if (shared_compute_queue)
-            {
-                queue_create_infos[i] = .{
-                    .flags = .{},
-                    .queue_family_index = self.compute_family_index.?,
-                    .queue_count = 1,
-                    .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
-                };
-            }
-            else
-            {
-                if (self.present_family_index) |index|
-                {
-                    queue_create_infos[i] = .{
-                        .flags = .{},
-                        .queue_family_index = index,
-                        .queue_count = 1,
-                        .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
-                    };
-
-                    i += 1;
-                }
-
-                if (self.compute_family_index) |index|
-                {
-                    queue_create_infos[i] = .{
-                        .flags = .{},
-                        .queue_family_index = index,
-                        .queue_count = 1,
-                        .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
-                    };
-
-                    i += 1;
-                }
-
-                if (self.transfer_family_index) |index|
-                {
-                    queue_create_infos[i] = .{
-                        .flags = .{},
-                        .queue_family_index = index,
-                        .queue_count = 1,
-                        .p_queue_priorities = @ptrCast([*]const f32, &@as(f32, 1)),
-                    };
-                }
-            }
-        }
+        std.log.info("self.graphics_family_index = {?}", .{ self.graphics_family_index });
+        std.log.info("self.present_family_index = {?}", .{ self.present_family_index });
+        std.log.info("self.compute_family_index = {?}", .{ self.compute_family_index });
+        std.log.info("self.transfer_family_index = {?}", .{ self.transfer_family_index });
 
         self.device = try self.vki.createDevice(self.physical_device, &.{
             .p_next = &device_vulkan13_features,
             .flags = .{},
-            .p_queue_create_infos = queue_create_infos.ptr,
+            .p_queue_create_infos = &queue_create_infos,
             .queue_create_info_count = @intCast(u32, queue_create_infos.len),
             .p_enabled_features = null,
             .enabled_extension_count = device_extentions.len,
