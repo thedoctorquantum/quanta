@@ -148,7 +148,8 @@ fn vulkanAllocate(
     _: vk.SystemAllocationScope
 ) callconv(vk.vulkan_call_conv) ?*anyopaque
 {
-    const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
+    _ = user_data;
+    // const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
 
     const memory = self.allocator.rawAlloc(size + @sizeOf(usize), @intCast(u29, alignment), 0, @returnAddress()) catch
     {
@@ -168,7 +169,9 @@ fn vulkanReallocate(
     _: vk.SystemAllocationScope
 ) callconv(vk.vulkan_call_conv) ?*anyopaque
 {
-    const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
+    // const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
+
+    _ = user_data;
 
     const original_pointer = @ptrCast([*]u8, original.?) - @sizeOf(usize);
     const old_size = @ptrCast(*usize, @alignCast(@alignOf(usize), original_pointer)).*;
@@ -193,13 +196,17 @@ fn vulkanFree(
 {
     if (memory == null) return;
 
-    const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
+    _ = user_data;
+
+    // const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
 
     const pointer = @ptrCast([*]u8, memory.?) - @sizeOf(usize);
     const size = @ptrCast(*usize, @alignCast(@alignOf(usize), pointer)).*;
 
     self.allocator.free(pointer[0..size + @sizeOf(usize)]);
 }
+
+pub var self: Context = undefined;
 
 allocator: std.mem.Allocator, 
 vulkan_loader: std.DynLib,
@@ -231,7 +238,7 @@ compute_command_pool: vk.CommandPool,
 transfer_command_pool: vk.CommandPool,
 debug_messenger: if (enable_debug_messenger) vk.DebugUtilsMessengerEXT else void,
 
-pub fn init(self: *Context, allocator: std.mem.Allocator) !void 
+pub fn init(allocator: std.mem.Allocator) !void 
 {
     self.allocator = allocator;
 
@@ -248,7 +255,7 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
     vkGetInstanceProcAddr = self.vulkan_loader.lookup(@TypeOf(vkGetInstanceProcAddr), "vkGetInstanceProcAddr") orelse return error.LoaderProcedureNotFound;
 
     self.allocation_callbacks = .{
-        .p_user_data = self,
+        .p_user_data = null,
         .pfn_allocation = vulkanAllocate,
         .pfn_reallocation = vulkanReallocate,
         .pfn_free = vulkanFree,
@@ -368,7 +375,7 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
                 .message_severity = .{ .info_bit_ext = true, .error_bit_ext = true },
                 .message_type = .{ .performance_bit_ext = true, .validation_bit_ext = enable_khronos_validation },
                 .pfn_user_callback = &debugUtilsMessengerCallback,
-                .p_user_data = self,
+                .p_user_data = null,
             },
             &self.allocation_callbacks
         );
@@ -671,11 +678,10 @@ pub fn init(self: *Context, allocator: std.mem.Allocator) !void
     }   
 }
 
-pub fn deinit(self: *Context) void 
+pub fn deinit() void 
 {
     self.vkd.deviceWaitIdle(self.device) catch unreachable;
 
-    defer self.* = undefined;
     defer self.vulkan_loader.close();
     defer self.vki.destroyInstance(self.instance, &self.allocation_callbacks);
     defer if (enable_debug_messenger) self.vki.destroyDebugUtilsMessengerEXT(
@@ -692,7 +698,7 @@ pub fn deinit(self: *Context) void
 }
 
 pub fn imageMemoryBarrier(
-    self: *Context, 
+    //self: *Context, 
     command_buffer: vk.CommandBuffer, 
     image: vk.Image,
     src_stage: vk.PipelineStageFlags2,

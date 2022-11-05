@@ -9,7 +9,6 @@ pub const PresentState = enum
     suboptimal,
 };
 
-context: *const Context,
 allocator: std.mem.Allocator,
 surface_format: vk.SurfaceFormatKHR,
 present_mode: vk.PresentModeKHR,
@@ -19,38 +18,38 @@ swap_images: []SwapImage,
 image_index: u32,
 next_image_acquired: vk.Semaphore,
 
-pub fn init(gc: *const Context, allocator: std.mem.Allocator, extent: vk.Extent2D) !Swapchain 
+pub fn init(allocator: std.mem.Allocator, extent: vk.Extent2D) !Swapchain 
 {
-    return try initRecycle(gc, allocator, extent, .null_handle);
+    return try initRecycle(allocator, extent, .null_handle);
 }
 
-pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.Extent2D, old_handle: vk.SwapchainKHR) !Swapchain 
+pub fn initRecycle(allocator: std.mem.Allocator, extent: vk.Extent2D, old_handle: vk.SwapchainKHR) !Swapchain 
 {
-    const caps = try gc.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(gc.physical_device, gc.surface);
+    const caps = try Context.self.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(Context.self.physical_device, Context.self.surface);
     const actual_extent = findActualExtent(caps, extent);
     if (actual_extent.width == 0 or actual_extent.height == 0) {
         return error.InvalidSurfaceDimensions;
     }
 
-    const surface_format = try findSurfaceFormat(gc, allocator);
-    const present_mode = try findPresentMode(gc, allocator);
+    const surface_format = try findSurfaceFormat(allocator);
+    const present_mode = try findPresentMode(allocator);
 
     var image_count = caps.min_image_count + 1;
     if (caps.max_image_count > 0) {
         image_count = std.math.min(image_count, caps.max_image_count);
     }
 
-    const qfi = [_]u32{ gc.graphics_family_index.?, gc.present_family_index.? };
-    const sharing_mode: vk.SharingMode = if (gc.graphics_family_index.? != gc.present_family_index.?)
+    const qfi = [_]u32{ Context.self.graphics_family_index.?, Context.self.present_family_index.? };
+    const sharing_mode: vk.SharingMode = if (Context.self.graphics_family_index.? != Context.self.present_family_index.?)
         .concurrent
     else
         .exclusive;
 
     std.log.info("swapchain image sharing mode: {}", .{ sharing_mode });
 
-    const handle = try gc.vkd.createSwapchainKHR(gc.device, &.{
+    const handle = try Context.self.vkd.createSwapchainKHR(Context.self.device, &.{
         .flags = .{},
-        .surface = gc.surface,
+        .surface = Context.self.surface,
         .min_image_count = image_count,
         .image_format = surface_format.format,
         .image_color_space = surface_format.color_space,
@@ -66,20 +65,20 @@ pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.
         .clipped = vk.TRUE,
         .old_swapchain = old_handle,
     }, null);
-    errdefer gc.vkd.destroySwapchainKHR(gc.device, handle, null);
+    errdefer Context.self.vkd.destroySwapchainKHR(Context.self.device, handle, null);
 
     if (old_handle != .null_handle) {
         // Apparently, the old swapchain handle still needs to be destroyed after recreating.
-        gc.vkd.destroySwapchainKHR(gc.device, old_handle, null);
+        Context.self.vkd.destroySwapchainKHR(Context.self.device, old_handle, null);
     }
 
-    const swap_images = try initSwapchainImages(gc, handle, surface_format.format, allocator);
-    errdefer for (swap_images) |si| si.deinit(gc);
+    const swap_images = try initSwapchainImages(handle, surface_format.format, allocator);
+    errdefer for (swap_images) |si| si.deinit();
 
-    var next_image_acquired = try gc.vkd.createSemaphore(gc.device, &.{ .flags = .{} }, null);
-    errdefer gc.vkd.destroySemaphore(gc.device, next_image_acquired, null);
+    var next_image_acquired = try Context.self.vkd.createSemaphore(Context.self.device, &.{ .flags = .{} }, null);
+    errdefer Context.self.vkd.destroySemaphore(Context.self.device, next_image_acquired, null);
 
-    const result = try gc.vkd.acquireNextImageKHR(gc.device, handle, std.math.maxInt(u64), next_image_acquired, .null_handle);
+    const result = try Context.self.vkd.acquireNextImageKHR(Context.self.device, handle, std.math.maxInt(u64), next_image_acquired, .null_handle);
     if (result.result != .success) {
         return error.ImageAcquireFailed;
     }
@@ -88,7 +87,6 @@ pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.
     
     return Swapchain
     {
-        .context = gc,
         .allocator = allocator,
         .surface_format = surface_format,
         .present_mode = present_mode,
@@ -102,8 +100,8 @@ pub fn initRecycle(gc: *const Context, allocator: std.mem.Allocator, extent: vk.
 
 fn deinitExceptSwapchain(self: Swapchain) void 
 {
-    for (self.swap_images) |si| si.deinit(self.context);
-    self.context.vkd.destroySemaphore(self.context.device, self.next_image_acquired, null);
+    for (self.swap_images) |si| si.deinit();
+    Context.self.vkd.destroySemaphore(Context.self.device, self.next_image_acquired, null);
 }
 
 pub fn waitForAllFences(self: Swapchain) !void 
@@ -114,17 +112,16 @@ pub fn waitForAllFences(self: Swapchain) !void
 pub fn deinit(self: Swapchain) void 
 {
     self.deinitExceptSwapchain();
-    self.context.vkd.destroySwapchainKHR(self.context.device, self.handle, null);
+    Context.self.vkd.destroySwapchainKHR(Context.self.device, self.handle, null);
     self.allocator.free(self.swap_images);
 }
 
 pub fn recreate(self: *Swapchain, new_extent: vk.Extent2D) !void 
 {
-    const gc = self.context;
     const allocator = self.allocator;
     const old_handle = self.handle;
     self.deinitExceptSwapchain();
-    self.* = try initRecycle(gc, allocator, new_extent, old_handle);
+    self.* = try initRecycle(allocator, new_extent, old_handle);
 }
 
 pub fn currentImage(self: Swapchain) vk.Image 
@@ -200,8 +197,8 @@ pub const SwapImage = struct
     render_finished: vk.Semaphore,
     frame_fence: vk.Fence,
 
-    fn init(gc: *const Context, image: vk.Image, format: vk.Format) !SwapImage {
-        const view = try gc.vkd.createImageView(gc.device, &.{
+    fn init(image: vk.Image, format: vk.Format) !SwapImage {
+        const view = try Context.self.vkd.createImageView(Context.self.device, &.{
             .flags = .{},
             .image = image,
             .view_type = .@"2d",
@@ -215,16 +212,16 @@ pub const SwapImage = struct
                 .layer_count = 1,
             },
         }, null);
-        errdefer gc.vkd.destroyImageView(gc.device, view, null);
+        errdefer Context.self.vkd.destroyImageView(Context.self.device, view, null);
 
-        const image_acquired = try gc.vkd.createSemaphore(gc.device, &.{ .flags = .{} }, null);
-        errdefer gc.vkd.destroySemaphore(gc.device, image_acquired, null);
+        const image_acquired = try Context.self.vkd.createSemaphore(Context.self.device, &.{ .flags = .{} }, null);
+        errdefer Context.self.vkd.destroySemaphore(Context.self.device, image_acquired, null);
 
-        const render_finished = try gc.vkd.createSemaphore(gc.device, &.{ .flags = .{} }, null);
-        errdefer gc.vkd.destroySemaphore(gc.device, render_finished, null);
+        const render_finished = try Context.self.vkd.createSemaphore(Context.self.device, &.{ .flags = .{} }, null);
+        errdefer Context.self.vkd.destroySemaphore(Context.self.device, render_finished, null);
 
-        const frame_fence = try gc.vkd.createFence(gc.device, &.{ .flags = .{ .signaled_bit = true } }, null);
-        errdefer gc.vkd.destroyFence(gc.device, frame_fence, null);
+        const frame_fence = try Context.self.vkd.createFence(Context.self.device, &.{ .flags = .{ .signaled_bit = true } }, null);
+        errdefer Context.self.vkd.destroyFence(Context.self.device, frame_fence, null);
 
         return SwapImage
         {
@@ -236,44 +233,44 @@ pub const SwapImage = struct
         };
     }
 
-    fn deinit(self: SwapImage, gc: *const Context) void 
+    fn deinit(self: SwapImage) void 
     {
-        self.waitForFence(gc) catch return;
-        gc.vkd.destroyImageView(gc.device, self.view, null);
-        gc.vkd.destroySemaphore(gc.device, self.image_acquired, null);
-        gc.vkd.destroySemaphore(gc.device, self.render_finished, null);
-        gc.vkd.destroyFence(gc.device, self.frame_fence, null);
+        self.waitForFence() catch return;
+        Context.self.vkd.destroyImageView(Context.self.device, self.view, null);
+        Context.self.vkd.destroySemaphore(Context.self.device, self.image_acquired, null);
+        Context.self.vkd.destroySemaphore(Context.self.device, self.render_finished, null);
+        Context.self.vkd.destroyFence(Context.self.device, self.frame_fence, null);
     }
 
-    pub fn waitForFence(self: SwapImage, gc: *const Context) !void 
+    pub fn waitForFence(self: SwapImage) !void 
     {
-        _ = try gc.vkd.waitForFences(gc.device, 1, @ptrCast([*]const vk.Fence, &self.frame_fence), vk.TRUE, std.math.maxInt(u64));
+        _ = try Context.self.vkd.waitForFences(Context.self.device, 1, @ptrCast([*]const vk.Fence, &self.frame_fence), vk.TRUE, std.math.maxInt(u64));
     }
 };
 
-fn initSwapchainImages(gc: *const Context, swapchain: vk.SwapchainKHR, format: vk.Format, allocator: std.mem.Allocator) ![]SwapImage 
+fn initSwapchainImages(swapchain: vk.SwapchainKHR, format: vk.Format, allocator: std.mem.Allocator) ![]SwapImage 
 {
     var count: u32 = undefined;
-    _ = try gc.vkd.getSwapchainImagesKHR(gc.device, swapchain, &count, null);
+    _ = try Context.self.vkd.getSwapchainImagesKHR(Context.self.device, swapchain, &count, null);
     const images = try allocator.alloc(vk.Image, count);
     defer allocator.free(images);
-    _ = try gc.vkd.getSwapchainImagesKHR(gc.device, swapchain, &count, images.ptr);
+    _ = try Context.self.vkd.getSwapchainImagesKHR(Context.self.device, swapchain, &count, images.ptr);
 
     const swap_images = try allocator.alloc(SwapImage, count);
     errdefer allocator.free(swap_images);
 
     var i: usize = 0;
-    errdefer for (swap_images[0..i]) |si| si.deinit(gc);
+    errdefer for (swap_images[0..i]) |si| si.deinit();
 
     for (images) |image| {
-        swap_images[i] = try SwapImage.init(gc, image, format);
+        swap_images[i] = try SwapImage.init(image, format);
         i += 1;
     }
 
     return swap_images;
 }
 
-fn findSurfaceFormat(gc: *const Context, allocator: std.mem.Allocator) !vk.SurfaceFormatKHR 
+fn findSurfaceFormat(allocator: std.mem.Allocator) !vk.SurfaceFormatKHR 
 {
     const preferred = vk.SurfaceFormatKHR{
         .format = .b8g8r8a8_srgb,
@@ -281,10 +278,10 @@ fn findSurfaceFormat(gc: *const Context, allocator: std.mem.Allocator) !vk.Surfa
     };
 
     var count: u32 = undefined;
-    _ = try gc.vki.getPhysicalDeviceSurfaceFormatsKHR(gc.physical_device, gc.surface, &count, null);
+    _ = try Context.self.vki.getPhysicalDeviceSurfaceFormatsKHR(Context.self.physical_device, Context.self.surface, &count, null);
     const surface_formats = try allocator.alloc(vk.SurfaceFormatKHR, count);
     defer allocator.free(surface_formats);
-    _ = try gc.vki.getPhysicalDeviceSurfaceFormatsKHR(gc.physical_device, gc.surface, &count, surface_formats.ptr);
+    _ = try Context.self.vki.getPhysicalDeviceSurfaceFormatsKHR(Context.self.physical_device, Context.self.surface, &count, surface_formats.ptr);
 
     for (surface_formats) |sfmt| {
         if (std.meta.eql(sfmt, preferred)) {
@@ -295,13 +292,13 @@ fn findSurfaceFormat(gc: *const Context, allocator: std.mem.Allocator) !vk.Surfa
     return surface_formats[0]; // There must always be at least one supported surface format
 }
 
-fn findPresentMode(gc: *const Context, allocator: std.mem.Allocator) !vk.PresentModeKHR 
+fn findPresentMode(allocator: std.mem.Allocator) !vk.PresentModeKHR 
 {
     var count: u32 = undefined;
-    _ = try gc.vki.getPhysicalDeviceSurfacePresentModesKHR(gc.physical_device, gc.surface, &count, null);
+    _ = try Context.self.vki.getPhysicalDeviceSurfacePresentModesKHR(Context.self.physical_device, Context.self.surface, &count, null);
     const present_modes = try allocator.alloc(vk.PresentModeKHR, count);
     defer allocator.free(present_modes);
-    _ = try gc.vki.getPhysicalDeviceSurfacePresentModesKHR(gc.physical_device, gc.surface, &count, present_modes.ptr);
+    _ = try Context.self.vki.getPhysicalDeviceSurfacePresentModesKHR(Context.self.physical_device, Context.self.surface, &count, present_modes.ptr);
 
     const preferred = [_]vk.PresentModeKHR{
         .mailbox_khr,

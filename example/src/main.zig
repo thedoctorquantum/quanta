@@ -1,6 +1,6 @@
 const std = @import("std");
-const quanta = @import("quanta");
 const builtin = @import("builtin");
+const quanta = @import("quanta");
 const windowing = quanta.windowing;
 const window = quanta.windowing.window;
 const GraphicsContext = quanta.graphics.Context;
@@ -21,31 +21,31 @@ pub fn main() !void
 
     const allocator = if (builtin.mode == .Debug) gpa.allocator() else std.heap.c_allocator;
 
-    try window.init(640, 480, "example");
+    try window.init(640, 480, "Quanta Example");
     defer window.deinit();
 
-    var graphics_context: GraphicsContext = undefined;
+    // var graphics_context: GraphicsContext = undefined;
 
-    try graphics_context.init(allocator);
-    defer graphics_context.deinit();
+    try GraphicsContext.init(allocator);
+    defer GraphicsContext.deinit();
 
-    var swapchain = try Swapchain.init(&graphics_context, allocator, .{ .width = 640, .height = 480 });
+    var swapchain = try Swapchain.init(allocator, .{ .width = 640, .height = 480 });
     defer swapchain.deinit();
 
     const cmdbufs = try allocator.alloc(vk.CommandBuffer, swapchain.swap_images.len);
     defer allocator.free(cmdbufs);
 
-    try graphics_context.vkd.allocateCommandBuffers(graphics_context.device, &.{
-        .command_pool = graphics_context.graphics_command_pool,
+    try GraphicsContext.self.vkd.allocateCommandBuffers(GraphicsContext.self.device, &.{
+        .command_pool = GraphicsContext.self.graphics_command_pool,
         .level = .primary,
         .command_buffer_count = @truncate(u32, cmdbufs.len),
     }, cmdbufs.ptr);
-    defer graphics_context.vkd.freeCommandBuffers(graphics_context.device, graphics_context.graphics_command_pool, @truncate(u32, cmdbufs.len), cmdbufs.ptr);
+    defer GraphicsContext.self.vkd.freeCommandBuffers(GraphicsContext.self.device, GraphicsContext.self.graphics_command_pool, @truncate(u32, cmdbufs.len), cmdbufs.ptr);
 
     const time_start = std.time.milliTimestamp();
 
-    const in_flight_fence = try graphics_context.vkd.createFence(graphics_context.device, &.{ .flags = .{ .signaled_bit = false } }, &graphics_context.allocation_callbacks);
-    defer graphics_context.vkd.destroyFence(graphics_context.device, in_flight_fence, &graphics_context.allocation_callbacks);
+    const in_flight_fence = try GraphicsContext.self.vkd.createFence(GraphicsContext.self.device, &.{ .flags = .{ .signaled_bit = false } }, &GraphicsContext.self.allocation_callbacks);
+    defer GraphicsContext.self.vkd.destroyFence(GraphicsContext.self.device, in_flight_fence, &GraphicsContext.self.allocation_callbacks);
 
     while (!window.shouldClose())
     {
@@ -71,15 +71,15 @@ pub fn main() !void
                 .extent = .{ .width = 640, .height = 480 },
             };
 
-            try graphics_context.vkd.resetCommandBuffer(cmdbuf, .{});
-            try graphics_context.vkd.beginCommandBuffer(cmdbuf, &.{
+            try GraphicsContext.self.vkd.resetCommandBuffer(cmdbuf, .{});
+            try GraphicsContext.self.vkd.beginCommandBuffer(cmdbuf, &.{
                 .flags = .{
                     .one_time_submit_bit = true,
                 },
                 .p_inheritance_info = null,
             });
 
-            graphics_context.vkd.cmdPipelineBarrier2(
+            GraphicsContext.self.vkd.cmdPipelineBarrier2(
                 cmdbuf, 
                 &.{
                     .dependency_flags = .{ .by_region_bit = true, },
@@ -134,7 +134,7 @@ pub fn main() !void
                     },
                 };
 
-                graphics_context.vkd.cmdBeginRendering(cmdbuf, &.{
+                GraphicsContext.self.vkd.cmdBeginRendering(cmdbuf, &.{
                     .flags = .{},
                     .render_area = .{ 
                         .offset = .{ .x = 0, .y = 0 }, 
@@ -147,13 +147,13 @@ pub fn main() !void
                     .p_depth_attachment = null,
                     .p_stencil_attachment = null,
                 });
-                defer graphics_context.vkd.cmdEndRendering(cmdbuf);
+                defer GraphicsContext.self.vkd.cmdEndRendering(cmdbuf);
 
-                graphics_context.vkd.cmdSetViewport(cmdbuf, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
-                graphics_context.vkd.cmdSetScissor(cmdbuf, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
+                GraphicsContext.self.vkd.cmdSetViewport(cmdbuf, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
+                GraphicsContext.self.vkd.cmdSetScissor(cmdbuf, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
             }
             
-            graphics_context.vkd.cmdPipelineBarrier2(
+            GraphicsContext.self.vkd.cmdPipelineBarrier2(
                 cmdbuf, 
                 &.{
                     .dependency_flags = .{ .by_region_bit = true, },
@@ -188,10 +188,10 @@ pub fn main() !void
                 }
             );
 
-            try graphics_context.vkd.endCommandBuffer(cmdbuf);
+            try GraphicsContext.self.vkd.endCommandBuffer(cmdbuf);
         }
 
-        try graphics_context.vkd.queueSubmit2(graphics_context.graphics_queue, 1, &[_]vk.SubmitInfo2
+        try GraphicsContext.self.vkd.queueSubmit2(GraphicsContext.self.graphics_queue, 1, &[_]vk.SubmitInfo2
         {
             .{
                 .flags = .{},
@@ -229,7 +229,7 @@ pub fn main() !void
             }
         }, in_flight_fence);
 
-        _ = try graphics_context.vkd.queuePresentKHR(graphics_context.graphics_queue, &.{
+        _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{
             .wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &image.render_finished),
             .swapchain_count = 1,
@@ -238,8 +238,8 @@ pub fn main() !void
             .p_results = null,
         });
 
-        const result = try swapchain.context.vkd.acquireNextImageKHR(
-            swapchain.context.device,
+        const result = try GraphicsContext.self.vkd.acquireNextImageKHR(
+            GraphicsContext.self.device,
             swapchain.handle,
             std.math.maxInt(u64),
             swapchain.next_image_acquired,
@@ -249,11 +249,11 @@ pub fn main() !void
         std.mem.swap(vk.Semaphore, &swapchain.swap_images[result.image_index].image_acquired, &swapchain.next_image_acquired);
         swapchain.image_index = result.image_index;
 
-        _ = try graphics_context.vkd.waitForFences(graphics_context.device, 1, @ptrCast([*]const vk.Fence, &in_flight_fence), vk.TRUE, std.math.maxInt(u64));
-        try swapchain.context.vkd.resetFences(swapchain.context.device, 1, @ptrCast([*]const vk.Fence, &in_flight_fence));
+        _ = try GraphicsContext.self.vkd.waitForFences(GraphicsContext.self.device, 1, @ptrCast([*]const vk.Fence, &in_flight_fence), vk.TRUE, std.math.maxInt(u64));
+        try GraphicsContext.self.vkd.resetFences(GraphicsContext.self.device, 1, @ptrCast([*]const vk.Fence, &in_flight_fence));
     }
 
-    try graphics_context.vkd.deviceWaitIdle(graphics_context.device);
+    try GraphicsContext.self.vkd.deviceWaitIdle(GraphicsContext.self.device);
 }
 
 pub fn log(
