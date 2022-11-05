@@ -30,6 +30,11 @@ pub fn build(builder: *std.build.Builder) !void
             try glfw.link(exe.builder, exe, .{});
         }
 
+        if (mode == .ReleaseFast)
+        {
+            exe.strip = true;
+        }
+
         const run_cmd = exe.run();
         run_cmd.step.dependOn(builder.getInstallStep());
 
