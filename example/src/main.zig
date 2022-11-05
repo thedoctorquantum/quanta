@@ -5,7 +5,11 @@ const windowing = quanta.windowing;
 const window = quanta.windowing.window;
 const GraphicsContext = quanta.graphics.Context;
 const Swapchain = quanta.graphics.Swapchain;
+const CommandBuffer = quanta.graphics.CommandBuffer;
+const GraphicsPipeline = quanta.graphics.GraphicsPipeline;
 const vk = quanta.graphics.vulkan;
+
+const shaders = @import("shaders.zig");
 
 pub fn main() !void 
 {
@@ -32,15 +36,30 @@ pub fn main() !void
     var swapchain = try Swapchain.init(allocator, .{ .width = 640, .height = 480 });
     defer swapchain.deinit();
 
-    const cmdbufs = try allocator.alloc(vk.CommandBuffer, swapchain.swap_images.len);
+    const cmdbufs = try allocator.alloc(CommandBuffer, swapchain.swap_images.len);
     defer allocator.free(cmdbufs);
 
-    try GraphicsContext.self.vkd.allocateCommandBuffers(GraphicsContext.self.device, &.{
-        .command_pool = GraphicsContext.self.graphics_command_pool,
-        .level = .primary,
-        .command_buffer_count = @truncate(u32, cmdbufs.len),
-    }, cmdbufs.ptr);
-    defer GraphicsContext.self.vkd.freeCommandBuffers(GraphicsContext.self.device, GraphicsContext.self.graphics_command_pool, @truncate(u32, cmdbufs.len), cmdbufs.ptr);
+    for (cmdbufs) |*cmdbuf|
+    {
+        cmdbuf.* = try CommandBuffer.init(.graphics);
+    }
+
+    defer for (cmdbufs) |*cmdbuf|
+    {
+        cmdbuf.deinit();
+    };
+
+    var pipeline = try GraphicsPipeline.init(
+        .{
+            .color_attachment_formats = &[_]vk.Format 
+            {
+                vk.Format.b8g8r8a8_srgb,
+            },
+            .vertex_shader_binary = shaders.tri_vert_spv,
+            .fragment_shader_binary = shaders.tri_frag_spv,
+        }
+    );
+    defer pipeline.deinit();
 
     const time_start = std.time.milliTimestamp();
 
@@ -50,7 +69,7 @@ pub fn main() !void
     while (!window.shouldClose())
     {
         const image_index = swapchain.image_index;
-        const cmdbuf = cmdbufs[image_index];
+        const cmdbuf: CommandBuffer = cmdbufs[image_index];
         const image = swapchain.swap_images[image_index];
 
         //record commands
@@ -71,16 +90,11 @@ pub fn main() !void
                 .extent = .{ .width = 640, .height = 480 },
             };
 
-            try GraphicsContext.self.vkd.resetCommandBuffer(cmdbuf, .{});
-            try GraphicsContext.self.vkd.beginCommandBuffer(cmdbuf, &.{
-                .flags = .{
-                    .one_time_submit_bit = true,
-                },
-                .p_inheritance_info = null,
-            });
+            try cmdbuf.begin();
+            defer cmdbuf.end();
 
             GraphicsContext.self.vkd.cmdPipelineBarrier2(
-                cmdbuf, 
+                cmdbuf.handle, 
                 &.{
                     .dependency_flags = .{ .by_region_bit = true, },
                     .memory_barrier_count = 0,
@@ -134,7 +148,7 @@ pub fn main() !void
                     },
                 };
 
-                GraphicsContext.self.vkd.cmdBeginRendering(cmdbuf, &.{
+                GraphicsContext.self.vkd.cmdBeginRendering(cmdbuf.handle, &.{
                     .flags = .{},
                     .render_area = .{ 
                         .offset = .{ .x = 0, .y = 0 }, 
@@ -147,14 +161,18 @@ pub fn main() !void
                     .p_depth_attachment = null,
                     .p_stencil_attachment = null,
                 });
-                defer GraphicsContext.self.vkd.cmdEndRendering(cmdbuf);
+                defer GraphicsContext.self.vkd.cmdEndRendering(cmdbuf.handle);
 
-                GraphicsContext.self.vkd.cmdSetViewport(cmdbuf, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
-                GraphicsContext.self.vkd.cmdSetScissor(cmdbuf, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
+                GraphicsContext.self.vkd.cmdSetViewport(cmdbuf.handle, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
+                GraphicsContext.self.vkd.cmdSetScissor(cmdbuf.handle, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
+
+                cmdbuf.setGraphicsPipeline(pipeline);
+
+                cmdbuf.draw(3, 1, 0, 0);
             }
             
             GraphicsContext.self.vkd.cmdPipelineBarrier2(
-                cmdbuf, 
+                cmdbuf.handle, 
                 &.{
                     .dependency_flags = .{ .by_region_bit = true, },
                     .memory_barrier_count = 0,
@@ -187,8 +205,6 @@ pub fn main() !void
                     }),
                 }
             );
-
-            try GraphicsContext.self.vkd.endCommandBuffer(cmdbuf);
         }
 
         try GraphicsContext.self.vkd.queueSubmit2(GraphicsContext.self.graphics_queue, 1, &[_]vk.SubmitInfo2
@@ -210,7 +226,7 @@ pub fn main() !void
                 .command_buffer_info_count = 1,
                 .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfo {
                     .{
-                        .command_buffer = cmdbuf,
+                        .command_buffer = cmdbuf.handle,
                         .device_mask = 0,
                     }
                 },

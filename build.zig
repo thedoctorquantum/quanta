@@ -35,6 +35,23 @@ pub fn build(builder: *std.build.Builder) !void
             exe.strip = true;
         }
 
+        const shader_optimisation = switch (mode)
+        {
+            .ReleaseFast => "-O",
+            .ReleaseSafe => "-O",
+            .ReleaseSmall => "-Os",
+            .Debug => "-O0",
+        };
+
+        const shader_target = "vulkan1.3";
+        const shader_source_directory = "example/src/shaders/";
+        const shader_binary_directory = "example/src/shaders/spirv/";
+
+        std.fs.cwd().makeDir(shader_binary_directory) catch {};
+
+        try builder.spawnChild(&[_][]const u8 { "glslc", "--target-env=" ++ shader_target, "-fshader-stage=vert", shader_source_directory ++ "tri.vert.glsl", "-Werror", "-c", shader_optimisation, "-o", shader_binary_directory ++ "tri.vert.spv" });
+        try builder.spawnChild(&[_][]const u8 { "glslc", "--target-env=" ++ shader_target, "-fshader-stage=frag", shader_source_directory ++ "tri.frag.glsl", "-Werror", "-c", shader_optimisation, "-o", shader_binary_directory ++ "tri.frag.spv" }); 
+
         const run_cmd = exe.run();
         run_cmd.step.dependOn(builder.getInstallStep());
 

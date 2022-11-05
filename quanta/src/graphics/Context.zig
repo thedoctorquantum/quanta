@@ -133,6 +133,11 @@ fn debugUtilsMessengerCallback(
         std.log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
         std.os.exit(0);
     }
+    else if (message_severity.warning_bit_ext)
+    {
+        std.log.warn("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        std.os.exit(0);
+    }
     else
     {
         std.log.warn("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
