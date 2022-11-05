@@ -7,6 +7,7 @@ const GraphicsContext = quanta.graphics.Context;
 const Swapchain = quanta.graphics.Swapchain;
 const CommandBuffer = quanta.graphics.CommandBuffer;
 const GraphicsPipeline = quanta.graphics.GraphicsPipeline;
+const Buffer = quanta.graphics.Buffer;
 const vk = quanta.graphics.vulkan;
 
 const shaders = @import("shaders.zig");
@@ -53,13 +54,38 @@ pub fn main() !void
         .{
             .color_attachment_formats = &[_]vk.Format 
             {
-                vk.Format.b8g8r8a8_srgb,
+                swapchain.surface_format.format,
             },
             .vertex_shader_binary = shaders.tri_vert_spv,
             .fragment_shader_binary = shaders.tri_frag_spv,
-        }
+        },
+        shaders.TriVertexInput,
     );
     defer pipeline.deinit();
+
+    var vertex_buffer = try Buffer.initData(
+        shaders.TriVertexInput, 
+        &[_]shaders.TriVertexInput
+        {
+            .{  
+                .in_position = .{ 1, 1, 0 },
+                .in_color = .{ 1, 0, 0 },
+            },
+            .{  
+                .in_position = .{ -1, 1, 0 },
+                .in_color = .{ 0, 1, 0 },
+            },
+            .{  
+                .in_position = .{ 0, -1, 0 },
+                .in_color = .{ 0, 0, 1 },
+            },
+        },
+        .vertex
+    );
+    defer vertex_buffer.deinit(); 
+
+    var index_buffer = try Buffer.initData(u16, &.{ 0, 1, 2 }, .index);
+    defer index_buffer.deinit();
 
     const time_start = std.time.milliTimestamp();
 
@@ -167,6 +193,8 @@ pub fn main() !void
                 GraphicsContext.self.vkd.cmdSetScissor(cmdbuf.handle, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
 
                 cmdbuf.setGraphicsPipeline(pipeline);
+                cmdbuf.setVertexBuffer(vertex_buffer);
+                cmdbuf.setIndexBuffer(index_buffer, .u32);
 
                 cmdbuf.draw(3, 1, 0, 0);
             }

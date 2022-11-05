@@ -16,12 +16,113 @@ pub const Options = struct
     stencil_attachment_format: ?vk.Format = null,
     vertex_shader_binary: []align(4) const u8,
     fragment_shader_binary: []align(4) const u8,
+    vertex_attribute_descriptions: []const vk.VertexInputAttributeDescription = &.{},
 };
 
+fn getAttributeFormat(comptime T: type) vk.Format 
+{
+    switch (@typeInfo(T))
+    {
+        .Int => |int| {
+            return switch (int.bits)
+            {
+                32 => if (int.signedness == .unsigned) .r32_uint else .r32_sint,
+                64 => if (int.signedness == .unsigned) .r64_uint else .r64_sint,
+                else => comptime unreachable,
+            };
+        },
+        .Float => |float| 
+        {
+            return switch (float.bits)
+            {
+                32 => .r32_sfloat,
+                64 => .r64_sfloat,
+                else => comptime unreachable,
+            };
+        },
+        .Array => |array| block: {
+            switch (@typeInfo(array.child))
+            {
+                .Float => |float| {
+                    switch (float.bits)
+                    {
+                        32 => {
+                            return switch (array.len)
+                            {
+                                2 => .r32g32_sfloat,
+                                3 => .r32g32b32_sfloat,
+                                4 => .r32g32b32a32_sfloat,
+                                else => comptime unreachable,
+                            };
+                        },
+                        64 => {
+                            return switch (array.len)
+                            {
+                                2 => .r64g64_sfloat,
+                                3 => .r64g64b64_sfloat,
+                                4 => .r64g64b64a64_sfloat,
+                                else => comptime unreachable,
+                            };
+                        },
+                        else => comptime unreachable,
+                    }
+                },
+                else => comptime unreachable,
+            }
+
+            break: block 0;
+        },
+        else => comptime unreachable,
+    }
+
+    comptime unreachable;
+}
+
+///Crude comptime attribute generator from type information, which isn't really sufficient 
+///but will do the job in most cases 
+///Also assumes interleaved memory layout
+fn getVertexLayout(comptime T: type) [std.meta.fieldNames(T).len]vk.VertexInputAttributeDescription
+{
+    std.debug.assert(std.meta.containerLayout(T) == .Extern);
+
+    var attributes: [std.meta.fieldNames(T).len]vk.VertexInputAttributeDescription = undefined;
+
+    inline for (std.meta.fields(T)) |field, i|
+    {
+        const format = getAttributeFormat(field.field_type);
+
+        attributes[i] = .{
+            .binding = 0,
+            .location = i,
+            .format = format,
+            .offset = @offsetOf(T, field.name),
+        };
+    }
+
+    return attributes;
+}
+
+///Provides a compile time known type for fixed function vertex layouts
+///Could use the upcoming zig feature inline function parameters with runtime type info
+///May also need to user spir-v reflection for more refined automatic vertex layout description 
 pub fn init(
     options: Options,
+    comptime VertexType: ?type,
     ) !GraphicsPipeline
 {
+    const vertex_binding_descriptions = [_]vk.VertexInputBindingDescription 
+    {
+        .{ 
+            .binding = 0,
+            .stride = @sizeOf(VertexType.?),
+            .input_rate = .vertex,
+        },
+    };
+
+    const vertex_attribute_descriptions = getVertexLayout(VertexType orelse unreachable);
+
+    std.log.debug("Vertex format for {s}: {any}", .{ @typeName(VertexType.?), vertex_attribute_descriptions });
+
     var self = GraphicsPipeline
     {
         .handle = .null_handle,
@@ -120,10 +221,10 @@ pub fn init(
                 .p_stages = &shader_stage_infos,
                 .p_vertex_input_state = &.{
                     .flags = .{},
-                    .vertex_binding_description_count = 0,
-                    .p_vertex_binding_descriptions = undefined,
-                    .vertex_attribute_description_count = 0,
-                    .p_vertex_attribute_descriptions = undefined,
+                    .vertex_binding_description_count = @intCast(u32, vertex_binding_descriptions.len),
+                    .p_vertex_binding_descriptions = &vertex_binding_descriptions,
+                    .vertex_attribute_description_count = @intCast(u32, vertex_attribute_descriptions.len),
+                    .p_vertex_attribute_descriptions = &vertex_attribute_descriptions,
                 },
                 .p_input_assembly_state = &.{
                     .flags = .{},

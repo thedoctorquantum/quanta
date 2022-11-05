@@ -745,3 +745,31 @@ pub fn imageMemoryBarrier(
         }
     );
 }
+
+pub fn getMemoryTypeIndex(requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !u32
+{
+    var memory_type_index: u32 = 0; 
+    
+    while (memory_type_index < self.physical_device_memory_properties.memory_type_count) : (memory_type_index += 1)
+    {
+        const memory_type = self.physical_device_memory_properties.memory_types[memory_type_index];
+        const has_properties = memory_type.property_flags.contains(properties);
+
+        if (has_properties and 
+            ((@as(u32, 1) << @intCast(u5, @bitCast(u32, memory_type_index))) & @bitCast(u32, requirements.memory_type_bits)) != 0
+        )
+        {
+            return memory_type_index;
+        }
+    }
+
+    return error.MemoryTypeNotFound;    
+}
+
+pub fn deviceAllocate(requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !vk.DeviceMemory
+{
+    return try self.vkd.allocateMemory(self.device, &.{
+        .allocation_size = requirements.size,
+        .memory_type_index = try getMemoryTypeIndex(requirements, properties),
+    }, &self.allocation_callbacks);    
+}

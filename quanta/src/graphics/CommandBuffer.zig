@@ -4,6 +4,7 @@ const std = @import("std");
 const vk = @import("vk.zig");
 const Context = @import("Context.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
+const Buffer = @import("Buffer.zig");
 
 pub const Queue = enum 
 {
@@ -82,6 +83,38 @@ pub fn setGraphicsPipeline(self: CommandBuffer, pipeline: GraphicsPipeline) void
         .graphics, 
         pipeline.handle
     );
+}
+
+pub fn setVertexBuffer(self: CommandBuffer, buffer: Buffer) void 
+{
+    Context.self.vkd.cmdBindVertexBuffers(self.handle, 0, 1, @ptrCast([*]const vk.Buffer, &buffer.handle), @ptrCast([*]const u64, &@as(u64, 0)));
+}
+
+pub const IndexType = enum 
+{
+    u16,
+    u32,
+};
+
+pub fn setIndexBuffer(self: CommandBuffer, buffer: Buffer, index_type: IndexType) void
+{
+    Context.self.vkd.cmdBindIndexBuffer(self.handle, buffer.handle, 0, switch (index_type)
+    {
+        .u16 => .uint16,
+        .u32 => .uint32,
+    });
+}
+
+pub fn copyBuffer(self: CommandBuffer, source: Buffer, destination: Buffer) void 
+{
+    const copy_region = vk.BufferCopy 
+    {
+        .src_offset = 0,
+        .dst_offset = 0,
+        .size = @min(source.size, destination.size),
+    };
+
+    Context.self.vkd.cmdCopyBuffer(self.handle, source.handle, destination.handle, 1, @ptrCast([*]const vk.BufferCopy, &copy_region));
 }
 
 pub fn draw(
