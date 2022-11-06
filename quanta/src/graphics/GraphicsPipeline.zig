@@ -108,6 +108,7 @@ fn getVertexLayout(comptime T: type) [std.meta.fieldNames(T).len]vk.VertexInputA
 pub fn init(
     options: Options,
     comptime VertexType: ?type,
+    comptime PushDataType: ?type,
     ) !GraphicsPipeline
 {
     const vertex_binding_descriptions = [_]vk.VertexInputBindingDescription 
@@ -137,8 +138,18 @@ pub fn init(
             .flags = .{},
             .set_layout_count = 0,
             .p_set_layouts = undefined,
-            .push_constant_range_count = 0,
-            .p_push_constant_ranges = undefined,
+            .push_constant_range_count = if (PushDataType != null) 1 else 0,
+            .p_push_constant_ranges = &[_]vk.PushConstantRange 
+            { 
+                .{ 
+                    .stage_flags = .{
+                        .vertex_bit = true,
+                        .fragment_bit = true,
+                    },
+                    .offset = 0,
+                    .size = @sizeOf(PushDataType orelse void),
+                },
+            },
         }, 
         &Context.self.allocation_callbacks
     );

@@ -7,7 +7,7 @@ const glfw = @import("glfw");
 
 pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
-pub const enable_mangohud = builtin.mode == .Debug or true;
+pub const enable_mangohud = builtin.mode == .Debug;
 pub const vulkan_version = std.builtin.Version { .major = 1, .minor = 3, .patch = 0, };
 
 pub const BaseDispatch = vk.BaseWrapper(.{

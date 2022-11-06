@@ -60,6 +60,7 @@ pub fn main() !void
             .fragment_shader_binary = shaders.tri_frag_spv,
         },
         shaders.TriVertexInput,
+        shaders.TriVertPushConstants,
     );
     defer pipeline.deinit();
 
@@ -100,7 +101,8 @@ pub fn main() !void
     {
         const time_begin = std.time.milliTimestamp();
 
-        defer {
+        defer 
+        {
             delta_time = std.time.milliTimestamp() - time_begin;
             
             if (delta_time < target_frame_time)
@@ -111,7 +113,7 @@ pub fn main() !void
         }
 
         const image_index = swapchain.image_index;
-        const cmdbuf: CommandBuffer = cmdbufs[image_index];
+        const cmdbuf: *CommandBuffer = &cmdbufs[image_index];
         const image = swapchain.swap_images[image_index];
 
         //record commands
@@ -174,6 +176,8 @@ pub fn main() !void
             {
                 const time = @intToFloat(f32, std.time.milliTimestamp() - time_start);
 
+                const sin = std.math.sin(time * 0.001);
+
                 const color_attachment = vk.RenderingAttachmentInfo
                 {
                     .image_view = image.view,
@@ -185,7 +189,7 @@ pub fn main() !void
                     .store_op = .store,
                     .clear_value = .{ 
                         .color = .{ 
-                            .float_32 = .{ 0, std.math.fabs(std.math.sin(time * 0.001)), 0, 1 },
+                            .float_32 = .{ 0, std.math.fabs(sin), 0, 1 },
                         },
                     },
                 };
@@ -211,6 +215,7 @@ pub fn main() !void
                 cmdbuf.setGraphicsPipeline(pipeline);
                 cmdbuf.setVertexBuffer(vertex_buffer);
                 cmdbuf.setIndexBuffer(index_buffer, .u32);
+                cmdbuf.setPushData(shaders.TriVertPushConstants, .{ .position = .{ sin, 0, 0 } });
 
                 cmdbuf.draw(3, 1, 0, 0);
             }

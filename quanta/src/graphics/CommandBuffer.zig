@@ -14,12 +14,14 @@ pub const Queue = enum
 
 handle: vk.CommandBuffer,
 queue: Queue,
+pipeline_layout: vk.PipelineLayout,
 
 pub fn init(queue: Queue) !CommandBuffer
 {
     var self: CommandBuffer = .{
         .handle = .null_handle,
-        .queue = queue
+        .queue = queue,
+        .pipeline_layout = .null_handle,
     };
 
     const pool = switch (self.queue)
@@ -76,18 +78,32 @@ pub fn endRenderPass(self: CommandBuffer) void
     _ = self;
 }
 
-pub fn setGraphicsPipeline(self: CommandBuffer, pipeline: GraphicsPipeline) void 
+pub fn setGraphicsPipeline(self: *CommandBuffer, pipeline: GraphicsPipeline) void 
 {
     Context.self.vkd.cmdBindPipeline(
         self.handle, 
         .graphics, 
         pipeline.handle
     );
+
+    self.pipeline_layout = pipeline.layout;
 }
 
 pub fn setVertexBuffer(self: CommandBuffer, buffer: Buffer) void 
 {
     Context.self.vkd.cmdBindVertexBuffers(self.handle, 0, 1, @ptrCast([*]const vk.Buffer, &buffer.handle), @ptrCast([*]const u64, &@as(u64, 0)));
+}
+
+pub fn setPushData(self: CommandBuffer, comptime T: type, data: T) void 
+{
+    Context.self.vkd.cmdPushConstants(
+        self.handle, 
+        self.pipeline_layout, 
+        .{ .vertex_bit = true, .fragment_bit = true }, 
+        0, 
+        @sizeOf(T), 
+        &data
+    );
 }
 
 pub const IndexType = enum 
