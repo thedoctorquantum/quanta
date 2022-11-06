@@ -8,7 +8,7 @@ layout(location = 0) in Out
 
 layout(location = 0) out vec4 output_color;
 
-layout (set = 0, binding = 0) uniform sampler2D albedo_sampler;
+layout(set = 0, binding = 0) uniform sampler2D albedo_sampler;
 
 void main() 
 {

@@ -9,11 +9,14 @@ handle: vk.Buffer,
 memory: vk.DeviceMemory,
 size: usize,
 alignment: usize,
+usage: Usage,
 
 pub const Usage = enum 
 {
     vertex,
     index,
+    uniform,
+    storage,
     staging,
 };
 
@@ -42,25 +45,7 @@ pub fn initData(comptime T: type, data: []const T, usage: Usage) !Buffer
         command_buffer.copyBuffer(staging, buffer);
     }
 
-    try Context.self.vkd.queueSubmit2(Context.self.graphics_queue, 1, &[_]vk.SubmitInfo2
-    {
-        .{
-            .flags = .{},
-            .wait_semaphore_info_count = 0,
-            .p_wait_semaphore_infos = undefined,
-            .command_buffer_info_count = 1,
-            .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfo {
-                .{
-                    .command_buffer = command_buffer.handle,
-                    .device_mask = 0,
-                }
-            },
-            .signal_semaphore_info_count = 0,
-            .p_signal_semaphore_infos = undefined,
-        }
-    }, .null_handle);
-
-    try Context.self.vkd.queueWaitIdle(Context.self.graphics_queue);
+    try command_buffer.submitAndWait();
 
     return buffer;
 }
@@ -73,6 +58,7 @@ pub fn init(size: usize, usage: Usage) !Buffer
         .memory = .null_handle,
         .size = size,
         .alignment = 0,
+        .usage = usage,
     };
 
     const create_info = vk.BufferCreateInfo 
@@ -83,6 +69,8 @@ pub fn init(size: usize, usage: Usage) !Buffer
         {
             .vertex => .{ .vertex_buffer_bit = true, .transfer_dst_bit = true },
             .index => .{ .index_buffer_bit = true, .transfer_dst_bit = true },
+            .uniform => .{ .uniform_buffer_bit = true, .transfer_dst_bit = true },
+            .storage => .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
             .staging => .{ .transfer_src_bit = true },
         },
         .sharing_mode = .exclusive,
@@ -100,7 +88,7 @@ pub fn init(size: usize, usage: Usage) !Buffer
     self.memory = try Context.deviceAllocate(memory_requirements, switch (usage)
     {
         .staging => .{ .host_visible_bit = true, .host_coherent_bit = true },
-        .vertex, .index => .{ .device_local_bit = true },
+        .vertex, .index, .uniform, .storage => .{ .device_local_bit = true },
     });
     errdefer Context.self.vkd.freeMemory(Context.self.device, self.memory, &Context.self.allocation_callbacks);
 

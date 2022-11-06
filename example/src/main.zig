@@ -9,6 +9,7 @@ const CommandBuffer = quanta.graphics.CommandBuffer;
 const GraphicsPipeline = quanta.graphics.GraphicsPipeline;
 const Buffer = quanta.graphics.Buffer;
 const Image = quanta.graphics.Image;
+const Sampler = quanta.graphics.Sampler;
 const png = quanta.asset.importers.png;
 const vk = quanta.graphics.vulkan;
 
@@ -50,7 +51,8 @@ pub fn main() !void
 
     defer GraphicsContext.deinit();
 
-    defer {
+    defer 
+    {
         const pipeline_cache_data = GraphicsContext.getPipelineCacheData() catch unreachable;
         defer allocator.free(pipeline_cache_data);
 
@@ -139,29 +141,19 @@ pub fn main() !void
     );
     defer test_texture_image.deinit();
 
-    const test_texture_sampler = try GraphicsContext.self.vkd.createSampler(
-        GraphicsContext.self.device, 
-        &.{
-            .flags = .{},
-            .mag_filter = .nearest,
-            .min_filter = .nearest,
-            .mipmap_mode = .nearest,
-            .address_mode_u = .repeat,
-            .address_mode_v = .repeat,
-            .address_mode_w = .repeat,
-            .mip_lod_bias = 0,
-            .anisotropy_enable = vk.FALSE,
-            .max_anisotropy = 0,
-            .compare_enable = vk.FALSE,
-            .compare_op = .always,
-            .min_lod = 0,
-            .max_lod = 0,
-            .border_color = .float_opaque_black,
-            .unnormalized_coordinates = vk.FALSE,
-        }, 
-        &GraphicsContext.self.allocation_callbacks,
-    );
-    defer GraphicsContext.self.vkd.destroySampler(GraphicsContext.self.device, test_texture_sampler, &GraphicsContext.self.allocation_callbacks);
+    var test_texture_sampler = try Sampler.init();
+    defer test_texture_sampler.deinit();
+
+    const ResourceSet = struct 
+    {
+        albedo_sampler: struct 
+        {
+            sampler: *const Sampler,
+            image: *const Image,
+        },
+    };
+
+    _ = ResourceSet;
 
     GraphicsContext.self.vkd.updateDescriptorSets(
         GraphicsContext.self.device, 
@@ -177,7 +169,7 @@ pub fn main() !void
                 .p_image_info = &[_]vk.DescriptorImageInfo
                 {
                     .{
-                        .sampler = test_texture_sampler,
+                        .sampler = test_texture_sampler.handle,
                         .image_view = test_texture_image.view,
                         .image_layout = test_texture_image.layout,
                     },
@@ -251,7 +243,7 @@ pub fn main() !void
                     .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
                     {
                         .src_stage_mask = .{
-                            .top_of_pipe_bit = true,
+                            .all_commands_bit = true,
                         },
                         .dst_stage_mask = .{
                             .color_attachment_output_bit = true,
@@ -259,7 +251,7 @@ pub fn main() !void
                         .src_access_mask = .{},
                         .dst_access_mask = .{ .color_attachment_write_bit = true },
                         .old_layout = .@"undefined",
-                        .new_layout = .color_attachment_optimal,
+                        .new_layout = .attachment_optimal,
                         .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                         .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                         .image = image.image,
@@ -283,7 +275,7 @@ pub fn main() !void
                 const color_attachment = vk.RenderingAttachmentInfo
                 {
                     .image_view = image.view,
-                    .image_layout = .color_attachment_optimal,
+                    .image_layout = .attachment_optimal,
                     .resolve_mode = .{},
                     .resolve_image_view = .null_handle,
                     .resolve_image_layout = .@"undefined",
@@ -347,12 +339,10 @@ pub fn main() !void
                         .src_stage_mask = .{
                             .color_attachment_output_bit = true,
                         },
-                        .dst_stage_mask = .{
-                            .bottom_of_pipe_bit = true,
-                        },
+                        .dst_stage_mask = .{},
                         .src_access_mask = .{ .color_attachment_write_bit = true },
                         .dst_access_mask = .{},
-                        .old_layout = .color_attachment_optimal,
+                        .old_layout = .attachment_optimal,
                         .new_layout = .present_src_khr,
                         .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                         .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
