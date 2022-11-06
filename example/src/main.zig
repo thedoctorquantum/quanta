@@ -92,8 +92,24 @@ pub fn main() !void
     const in_flight_fence = try GraphicsContext.self.vkd.createFence(GraphicsContext.self.device, &.{ .flags = .{ .signaled_bit = false } }, &GraphicsContext.self.allocation_callbacks);
     defer GraphicsContext.self.vkd.destroyFence(GraphicsContext.self.device, in_flight_fence, &GraphicsContext.self.allocation_callbacks);
 
+    const target_frame_time: i64 = 16; 
+
+    var delta_time: i64 = 0;
+
     while (!window.shouldClose())
     {
+        const time_begin = std.time.milliTimestamp();
+
+        defer {
+            delta_time = std.time.milliTimestamp() - time_begin;
+            
+            if (delta_time < target_frame_time)
+            {
+                //Slow down the game loop
+                std.time.sleep(@intCast(u64, ((target_frame_time - delta_time) * std.time.ns_per_ms)));
+            }
+        }
+
         const image_index = swapchain.image_index;
         const cmdbuf: CommandBuffer = cmdbufs[image_index];
         const image = swapchain.swap_images[image_index];
