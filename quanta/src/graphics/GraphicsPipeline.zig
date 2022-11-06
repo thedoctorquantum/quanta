@@ -8,6 +8,9 @@ handle: vk.Pipeline,
 layout: vk.PipelineLayout,
 vertex_shader: vk.ShaderModule,
 fragment_shader: vk.ShaderModule,
+descriptor_set_layouts: []vk.DescriptorSetLayout,
+descriptor_sets: []vk.DescriptorSet,
+descriptor_pool: vk.DescriptorPool,
 
 pub const Options = struct 
 {
@@ -124,20 +127,86 @@ pub fn init(
 
     std.log.debug("Vertex format for {s}: {any}", .{ @typeName(VertexType.?), vertex_attribute_descriptions });
 
+    const descriptor_set_layout_bindings = [1]vk.DescriptorSetLayoutBinding
+    {
+        .{
+            .binding = 0,
+            .descriptor_type = .combined_image_sampler,
+            .descriptor_count = 1,
+            .stage_flags = .{ .fragment_bit = true, },
+            .p_immutable_samplers = null,
+        },
+    };
+
+    const descriptor_pool_sizes = [1]vk.DescriptorPoolSize
+    {
+        .{
+            .@"type" = .combined_image_sampler,
+            .descriptor_count = 1,
+        }
+    };
+
+    const descriptor_set_layout_infos = [1]vk.DescriptorSetLayoutCreateInfo
+    {
+        .{
+            .flags = .{ .update_after_bind_pool_bit = true },
+            .binding_count = descriptor_set_layout_bindings.len,
+            .p_bindings = &descriptor_set_layout_bindings,
+        }
+    };
+
+    const Static = struct 
+    {
+        var descriptor_set_layouts: [descriptor_set_layout_infos.len]vk.DescriptorSetLayout = undefined;
+        var descriptor_sets: [descriptor_set_layout_infos.len]vk.DescriptorSet = undefined;
+    };
+
     var self = GraphicsPipeline
     {
         .handle = .null_handle,
         .layout = .null_handle,
         .vertex_shader = .null_handle,
         .fragment_shader = .null_handle,
+        .descriptor_set_layouts = &Static.descriptor_set_layouts,
+        .descriptor_sets = &Static.descriptor_sets,
+        .descriptor_pool = .null_handle,
     };
+
+    self.descriptor_pool = try Context.self.vkd.createDescriptorPool(Context.self.device, &.{
+        .flags = .{ .update_after_bind_bit = true },
+        .max_sets = 1,
+        .pool_size_count = 1,
+        .p_pool_sizes = &descriptor_pool_sizes,
+    }, &Context.self.allocation_callbacks);
+    errdefer Context.self.vkd.destroyDescriptorPool(Context.self.device, self.descriptor_pool, &Context.self.allocation_callbacks);
+
+    for (Static.descriptor_set_layouts) |*descriptor_set_layout, i|
+    {
+        descriptor_set_layout.* = try Context.self.vkd.createDescriptorSetLayout(
+            Context.self.device,
+            &descriptor_set_layout_infos[i],
+            &Context.self.allocation_callbacks
+        );
+    }
+
+    errdefer for (Static.descriptor_set_layouts) |descriptor_set_layout|
+    {
+        Context.self.vkd.destroyDescriptorSetLayout(Context.self.device, descriptor_set_layout, &Context.self.allocation_callbacks);
+    };
+
+    try Context.self.vkd.allocateDescriptorSets(Context.self.device, &.{
+        .descriptor_pool = self.descriptor_pool,
+        .descriptor_set_count = Static.descriptor_set_layouts.len,
+        .p_set_layouts = &Static.descriptor_set_layouts,
+    }, &Static.descriptor_sets);
+    errdefer Context.self.vkd.freeDescriptorSets(Context.self.device, self.descriptor_pool, Static.descriptor_sets.len, &Static.descriptor_sets) catch unreachable;
 
     self.layout = try Context.self.vkd.createPipelineLayout(
         Context.self.device, 
         &.{
             .flags = .{},
-            .set_layout_count = 0,
-            .p_set_layouts = undefined,
+            .set_layout_count = @intCast(u32, self.descriptor_set_layouts.len),
+            .p_set_layouts = self.descriptor_set_layouts.ptr,
             .push_constant_range_count = if (PushDataType != null) 1 else 0,
             .p_push_constant_ranges = &[_]vk.PushConstantRange 
             { 
@@ -215,7 +284,7 @@ pub fn init(
 
     _ = try Context.self.vkd.createGraphicsPipelines(
         Context.self.device, 
-        .null_handle, 
+        Context.self.pipeline_cache, 
         1, 
         &[_]vk.GraphicsPipelineCreateInfo {
             .{
@@ -329,11 +398,17 @@ pub fn deinit(self: *GraphicsPipeline) void
 {
     defer self.* = undefined;
 
+    defer Context.self.vkd.destroyDescriptorPool(Context.self.device, self.descriptor_pool, &Context.self.allocation_callbacks);
     defer Context.self.vkd.destroyPipelineLayout(
         Context.self.device, 
         self.layout, 
         &Context.self.allocation_callbacks
     );
+
+    defer for (self.descriptor_set_layouts) |descriptor_set_layout|
+    {
+        Context.self.vkd.destroyDescriptorSetLayout(Context.self.device, descriptor_set_layout, &Context.self.allocation_callbacks);
+    };
 
     defer Context.self.vkd.destroyShaderModule(Context.self.device, self.vertex_shader, &Context.self.allocation_callbacks);
     defer Context.self.vkd.destroyShaderModule(Context.self.device, self.fragment_shader, &Context.self.allocation_callbacks);

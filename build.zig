@@ -1,7 +1,9 @@
 const std = @import("std");
 
-const vkgen = @import("lib/vulkan-zig/generator/index.zig");
-const glfw = @import("lib/mach-glfw/build.zig");
+const glfw = @import("quanta/lib/mach-glfw/build.zig");
+
+const quanta = @import("quanta/src/main.zig");
+// const png = quanta.asset.importers.png;
 
 fn compileShader(builder: *std.build.Builder, mode: std.builtin.Mode, comptime stage: []const u8, comptime source: []const u8, comptime output: []const u8) !void 
 {
@@ -52,6 +54,11 @@ pub fn build(builder: *std.build.Builder) !void
                 .source = .{ .path = "quanta/src/main.zig" },
                 .dependencies = &.{
                     glfw.pkg,
+                    std.build.Pkg
+                    {
+                        .name = "zigimg",
+                        .source = .{ .path = "quanta/lib/zigimg/zigimg.zig" }
+                    },
                 },
             };
 
@@ -59,6 +66,17 @@ pub fn build(builder: *std.build.Builder) !void
 
             try glfw.link(exe.builder, exe, .{});
         }
+
+        // var tileset = try png.importFile(builder.allocator, "example/src/assets/tileset.png");
+        // defer png.free(&tileset, builder.allocator);
+
+        // const assets_options = builder.addOptions();
+
+        // // assets_options.addOption([]const u8, "tileset_data", tileset.data);
+        // // assets_options.addOption(u32, "tileset_width", tileset.width);
+        // // assets_options.addOption(u32, "tileset_height", tileset.height);
+
+        // exe.addOptions("assets", assets_options);
 
         if (mode == .ReleaseFast or mode == .ReleaseSmall)
         {

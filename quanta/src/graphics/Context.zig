@@ -7,7 +7,7 @@ const glfw = @import("glfw");
 
 pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
-pub const enable_mangohud = builtin.mode == .Debug;
+pub const enable_mangohud = builtin.mode == .Debug or true;
 pub const vulkan_version = std.builtin.Version { .major = 1, .minor = 3, .patch = 0, };
 
 pub const BaseDispatch = vk.BaseWrapper(.{
@@ -109,6 +109,9 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .createDescriptorPool = true,
     .updateDescriptorSets = true,
     .cmdPipelineBarrier2 = true,
+    .cmdCopyBufferToImage2 = true,
+    .createSampler = true,
+    .destroySampler = true,
 });
 
 var vkGetInstanceProcAddr: vk.PfnGetInstanceProcAddr = undefined;
@@ -241,9 +244,10 @@ graphics_command_pool: vk.CommandPool,
 present_command_pool: vk.CommandPool,
 compute_command_pool: vk.CommandPool,
 transfer_command_pool: vk.CommandPool,
+pipeline_cache: vk.PipelineCache,
 debug_messenger: if (enable_debug_messenger) vk.DebugUtilsMessengerEXT else void,
 
-pub fn init(allocator: std.mem.Allocator) !void 
+pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void 
 {
     self.allocator = allocator;
 
@@ -681,6 +685,21 @@ pub fn init(allocator: std.mem.Allocator) !void
             }, &self.allocation_callbacks);
         }
     }   
+
+    {
+        @setRuntimeSafety(false);
+
+        self.pipeline_cache = try self.vkd.createPipelineCache(
+            self.device, 
+            &.{
+                .flags = .{},
+                .initial_data_size = pipeline_cache_data.len,
+                .p_initial_data = if (pipeline_cache_data.len != 0) pipeline_cache_data.ptr else undefined,
+            }, 
+            &self.allocation_callbacks,
+        );
+    }
+    errdefer self.vkd.destroyPipelineCache(self.device, self.pipeline_cache, &self.allocation_callbacks);
 }
 
 pub fn deinit() void 
@@ -700,6 +719,7 @@ pub fn deinit() void
     defer if (self.present_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.present_command_pool, &self.allocation_callbacks);
     defer if (self.compute_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.compute_command_pool, &self.allocation_callbacks);
     defer if (self.transfer_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.transfer_command_pool, &self.allocation_callbacks);
+    defer self.vkd.destroyPipelineCache(self.device, self.pipeline_cache, &self.allocation_callbacks);
 }
 
 pub fn imageMemoryBarrier(
@@ -773,3 +793,16 @@ pub fn deviceAllocate(requirements: vk.MemoryRequirements, properties: vk.Memory
         .memory_type_index = try getMemoryTypeIndex(requirements, properties),
     }, &self.allocation_callbacks);    
 }
+
+pub fn getPipelineCacheData() ![]const u8 
+{
+    var data: []u8 = undefined;
+
+    _ = try self.vkd.getPipelineCacheData(self.device, self.pipeline_cache, &data.len, null);
+
+    data = try self.allocator.alloc(u8, data.len);
+
+    _ = try self.vkd.getPipelineCacheData(self.device, self.pipeline_cache, &data.len, @ptrCast(*anyopaque, data.ptr));
+
+    return data;
+} 

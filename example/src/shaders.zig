@@ -6,6 +6,7 @@ pub const TriVertexInput = extern struct
 {
     in_position: [3]f32,
     in_color: [3]f32,
+    in_uv: [2]f32,
 };
 
 pub const TriVertPushConstants = extern struct 

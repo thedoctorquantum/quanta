@@ -1,6 +1,9 @@
-[submodule "lib/mach-glfw"]
-	path = lib/mach-glfw
-	url = https://github.com/hexops/mach-glfw.git
-[submodule "lib/vulkan-zig"]
-	path = lib/vulkan-zig
+[submodule "quanta/lib/vulkan-zig"]
+	path = quanta/lib/vulkan-zig
 	url = https://github.com/Snektron/vulkan-zig.git
+[submodule "quanta/lib/zigimg"]
+	path = quanta/lib/zigimg
+	url = https://github.com/zigimg/zigimg.git
+[submodule "quanta/lib/mach-glfw"]
+	path = quanta/lib/mach-glfw
+	url = https://github.com/hexops/mach-glfw.git

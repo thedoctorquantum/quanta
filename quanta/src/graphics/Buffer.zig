@@ -26,7 +26,7 @@ pub fn initData(comptime T: type, data: []const T, usage: Usage) !Buffer
     errdefer buffer.deinit();
 
     {
-        const mapped_data = try staging.map(T, staging);
+        const mapped_data = try staging.map(T);
         defer staging.unmap();
 
         std.mem.copy(T, mapped_data, data);
@@ -117,11 +117,11 @@ pub fn deinit(self: *Buffer) void
     defer Context.self.vkd.freeMemory(Context.self.device, self.memory, &Context.self.allocation_callbacks);
 }
 
-pub fn map(self: Buffer, comptime T: type, buffer: Buffer) ![]T
+pub fn map(self: Buffer, comptime T: type) ![]T
 {
-    const data = @ptrCast(?[*]T, @alignCast(@alignOf(T), try Context.self.vkd.mapMemory(Context.self.device, self.memory, 0, buffer.size, .{})));
+    const data = @ptrCast(?[*]T, @alignCast(@alignOf(T), try Context.self.vkd.mapMemory(Context.self.device, self.memory, 0, self.size, .{})));
 
-    return data.?[0..buffer.size / @sizeOf(T)];
+    return data.?[0..self.size / @sizeOf(T)];
 }
 
 pub fn unmap(self: Buffer) void

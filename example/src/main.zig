@@ -8,9 +8,12 @@ const Swapchain = quanta.graphics.Swapchain;
 const CommandBuffer = quanta.graphics.CommandBuffer;
 const GraphicsPipeline = quanta.graphics.GraphicsPipeline;
 const Buffer = quanta.graphics.Buffer;
+const Image = quanta.graphics.Image;
+const png = quanta.asset.importers.png;
 const vk = quanta.graphics.vulkan;
 
 const shaders = @import("shaders.zig");
+const assets = @import("assets");
 
 pub fn main() !void 
 {
@@ -29,10 +32,35 @@ pub fn main() !void
     try window.init(640, 480, "Quanta Example");
     defer window.deinit();
 
-    // var graphics_context: GraphicsContext = undefined;
+    const pipeline_cache_file_path = "pipeline_cache";
 
-    try GraphicsContext.init(allocator);
+    {
+        var pipeline_cache_data: []u8 = &[_]u8 {};
+
+        const file = std.fs.cwd().openFile(pipeline_cache_file_path, .{}) catch try std.fs.cwd().createFile(pipeline_cache_file_path, .{ .read = true });
+        defer file.close();
+
+        pipeline_cache_data = try file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        defer allocator.free(pipeline_cache_data);
+
+        std.log.debug("pipeline_cache_data.len = {}", .{ pipeline_cache_data.len });
+
+        try GraphicsContext.init(allocator, pipeline_cache_data);
+    }
+
     defer GraphicsContext.deinit();
+
+    defer {
+        const pipeline_cache_data = GraphicsContext.getPipelineCacheData() catch unreachable;
+        defer allocator.free(pipeline_cache_data);
+
+        const file = std.fs.cwd().openFile(pipeline_cache_file_path, .{ .mode = .write_only }) catch unreachable;
+        defer file.close();
+
+        file.seekTo(0) catch unreachable;
+
+        file.writeAll(pipeline_cache_data) catch unreachable;
+    }
 
     var swapchain = try Swapchain.init(allocator, .{ .width = 640, .height = 480 });
     defer swapchain.deinit();
@@ -50,6 +78,8 @@ pub fn main() !void
         cmdbuf.deinit();
     };
 
+    const pipeline_create_start = std.time.nanoTimestamp();
+
     var pipeline = try GraphicsPipeline.init(
         .{
             .color_attachment_formats = &[_]vk.Format 
@@ -64,6 +94,11 @@ pub fn main() !void
     );
     defer pipeline.deinit();
 
+    const pipeline_create_end = std.time.nanoTimestamp();
+    const pipeline_create_time = pipeline_create_end - pipeline_create_start;
+
+    std.log.info("pipeline compile time: {d}ms", .{ @intToFloat(f32, pipeline_create_time) / @intToFloat(f32, std.time.ns_per_ms) });
+
     var vertex_buffer = try Buffer.initData(
         shaders.TriVertexInput, 
         &[_]shaders.TriVertexInput
@@ -71,14 +106,17 @@ pub fn main() !void
             .{  
                 .in_position = .{ 1, 1, 0 },
                 .in_color = .{ 1, 0, 0 },
+                .in_uv = .{ 0, 0 },
             },
             .{  
                 .in_position = .{ -1, 1, 0 },
                 .in_color = .{ 0, 1, 0 },
+                .in_uv = .{ 1, 0 },
             },
             .{  
                 .in_position = .{ 0, -1, 0 },
                 .in_color = .{ 0, 0, 1 },
+                .in_uv = .{ 0.5, 1 },
             },
         },
         .vertex
@@ -87,6 +125,70 @@ pub fn main() !void
 
     var index_buffer = try Buffer.initData(u16, &.{ 0, 1, 2 }, .index);
     defer index_buffer.deinit();
+
+    const tileset_import = try png.import(allocator, @embedFile("assets/tileset.png"));
+    defer allocator.free(tileset_import.data);
+
+    var test_texture_image: Image = try Image.initData(
+        tileset_import.data, 
+        tileset_import.width, 
+        tileset_import.height, 
+        1, 
+        .r8g8b8a8_srgb, 
+        vk.ImageLayout.shader_read_only_optimal
+    );
+    defer test_texture_image.deinit();
+
+    const test_texture_sampler = try GraphicsContext.self.vkd.createSampler(
+        GraphicsContext.self.device, 
+        &.{
+            .flags = .{},
+            .mag_filter = .nearest,
+            .min_filter = .nearest,
+            .mipmap_mode = .nearest,
+            .address_mode_u = .repeat,
+            .address_mode_v = .repeat,
+            .address_mode_w = .repeat,
+            .mip_lod_bias = 0,
+            .anisotropy_enable = vk.FALSE,
+            .max_anisotropy = 0,
+            .compare_enable = vk.FALSE,
+            .compare_op = .always,
+            .min_lod = 0,
+            .max_lod = 0,
+            .border_color = .float_opaque_black,
+            .unnormalized_coordinates = vk.FALSE,
+        }, 
+        &GraphicsContext.self.allocation_callbacks,
+    );
+    defer GraphicsContext.self.vkd.destroySampler(GraphicsContext.self.device, test_texture_sampler, &GraphicsContext.self.allocation_callbacks);
+
+    GraphicsContext.self.vkd.updateDescriptorSets(
+        GraphicsContext.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = pipeline.descriptor_sets[0],
+                .dst_binding = 0,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .combined_image_sampler,
+                .p_image_info = &[_]vk.DescriptorImageInfo
+                {
+                    .{
+                        .sampler = test_texture_sampler,
+                        .image_view = test_texture_image.view,
+                        .image_layout = test_texture_image.layout,
+                    },
+                },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            }
+        }, 
+        0, 
+        undefined,
+    );
 
     const time_start = std.time.milliTimestamp();
 
@@ -108,7 +210,7 @@ pub fn main() !void
             if (delta_time < target_frame_time)
             {
                 //Slow down the game loop
-                std.time.sleep(@intCast(u64, ((target_frame_time - delta_time) * std.time.ns_per_ms)));
+                std.time.sleep(@intCast(u64, (target_frame_time - delta_time) * std.time.ns_per_ms));
             }
         }
 
@@ -189,7 +291,7 @@ pub fn main() !void
                     .store_op = .store,
                     .clear_value = .{ 
                         .color = .{ 
-                            .float_32 = .{ 0, std.math.fabs(sin), 0, 1 },
+                            .float_32 = .{ 0, 0.2, std.math.fabs(sin), 1 },
                         },
                     },
                 };
@@ -214,10 +316,21 @@ pub fn main() !void
 
                 cmdbuf.setGraphicsPipeline(pipeline);
                 cmdbuf.setVertexBuffer(vertex_buffer);
-                cmdbuf.setIndexBuffer(index_buffer, .u32);
+                cmdbuf.setIndexBuffer(index_buffer, .u16);
                 cmdbuf.setPushData(shaders.TriVertPushConstants, .{ .position = .{ sin, 0, 0 } });
 
-                cmdbuf.draw(3, 1, 0, 0);
+                GraphicsContext.self.vkd.cmdBindDescriptorSets(
+                    cmdbuf.handle, 
+                    .graphics,
+                    cmdbuf.pipeline_layout, 
+                    0, 
+                    1, 
+                    pipeline.descriptor_sets.ptr, 
+                    0, 
+                    undefined
+                );
+
+                cmdbuf.drawIndexed(3, 1, 0, 0, 0);
             }
             
             GraphicsContext.self.vkd.cmdPipelineBarrier2(
