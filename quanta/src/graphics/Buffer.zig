@@ -17,6 +17,7 @@ pub const Usage = enum
     index,
     uniform,
     storage,
+    indirect_draw,
     staging,
 };
 
@@ -71,6 +72,7 @@ pub fn init(size: usize, usage: Usage) !Buffer
             .index => .{ .index_buffer_bit = true, .transfer_dst_bit = true },
             .uniform => .{ .uniform_buffer_bit = true, .transfer_dst_bit = true },
             .storage => .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
+            .indirect_draw => .{ .indirect_buffer_bit = true, .transfer_dst_bit = true, },
             .staging => .{ .transfer_src_bit = true },
         },
         .sharing_mode = .exclusive,
@@ -88,7 +90,7 @@ pub fn init(size: usize, usage: Usage) !Buffer
     self.memory = try Context.deviceAllocate(memory_requirements, switch (usage)
     {
         .staging => .{ .host_visible_bit = true, .host_coherent_bit = true },
-        .vertex, .index, .uniform, .storage => .{ .device_local_bit = true },
+        .vertex, .index, .uniform, .storage, .indirect_draw => .{ .device_local_bit = true },
     });
     errdefer Context.self.vkd.freeMemory(Context.self.device, self.memory, &Context.self.allocation_callbacks);
 

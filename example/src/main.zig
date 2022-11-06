@@ -13,6 +13,9 @@ const Sampler = quanta.graphics.Sampler;
 const png = quanta.asset.importers.png;
 const vk = quanta.graphics.vulkan;
 
+const graphics = quanta.graphics;
+const Renderer3D = quanta.renderer.Renderer3D;
+
 const shaders = @import("shaders.zig");
 const assets = @import("assets");
 
@@ -67,6 +70,9 @@ pub fn main() !void
     var swapchain = try Swapchain.init(allocator, .{ .width = 640, .height = 480 });
     defer swapchain.deinit();
 
+    try Renderer3D.init(allocator, &swapchain);
+    defer Renderer3D.deinit();
+
     const cmdbufs = try allocator.alloc(CommandBuffer, swapchain.swap_images.len);
     defer allocator.free(cmdbufs);
 
@@ -93,6 +99,12 @@ pub fn main() !void
         },
         shaders.TriVertexInput,
         shaders.TriVertPushConstants,
+        &.{ 
+            struct 
+            {
+                image_samplers: []struct { sampler: *const Sampler, image: *const Image },
+            }
+        },
     );
     defer pipeline.deinit();
 
@@ -106,17 +118,17 @@ pub fn main() !void
         &[_]shaders.TriVertexInput
         {
             .{  
-                .in_position = .{ 1, 1, 0 },
+                .in_position = .{ 0.5, 0.5, 0 },
                 .in_color = .{ 1, 0, 0 },
                 .in_uv = .{ 0, 0 },
             },
             .{  
-                .in_position = .{ -1, 1, 0 },
+                .in_position = .{ -0.5, 0.5, 0 },
                 .in_color = .{ 0, 1, 0 },
                 .in_uv = .{ 1, 0 },
             },
             .{  
-                .in_position = .{ 0, -1, 0 },
+                .in_position = .{ 0, -0.5, 0 },
                 .in_color = .{ 0, 0, 1 },
                 .in_uv = .{ 0.5, 1 },
             },
@@ -184,8 +196,8 @@ pub fn main() !void
 
     const time_start = std.time.milliTimestamp();
 
-    const in_flight_fence = try GraphicsContext.self.vkd.createFence(GraphicsContext.self.device, &.{ .flags = .{ .signaled_bit = false } }, &GraphicsContext.self.allocation_callbacks);
-    defer GraphicsContext.self.vkd.destroyFence(GraphicsContext.self.device, in_flight_fence, &GraphicsContext.self.allocation_callbacks);
+    var in_flight_fence = try graphics.Fence.init();
+    defer in_flight_fence.deinit();
 
     const target_frame_time: i64 = 16; 
 
@@ -242,13 +254,9 @@ pub fn main() !void
                     .image_memory_barrier_count = 1,
                     .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
                     {
-                        .src_stage_mask = .{
-                            .all_commands_bit = true,
-                        },
-                        .dst_stage_mask = .{
-                            .color_attachment_output_bit = true,
-                        },
+                        .src_stage_mask = .{ .all_commands_bit = true },
                         .src_access_mask = .{},
+                        .dst_stage_mask = .{ .color_attachment_output_bit = true },
                         .dst_access_mask = .{ .color_attachment_write_bit = true },
                         .old_layout = .@"undefined",
                         .new_layout = .attachment_optimal,
@@ -336,11 +344,9 @@ pub fn main() !void
                     .image_memory_barrier_count = 1,
                     .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
                     {
-                        .src_stage_mask = .{
-                            .color_attachment_output_bit = true,
-                        },
-                        .dst_stage_mask = .{},
+                        .src_stage_mask = .{ .color_attachment_output_bit = true },
                         .src_access_mask = .{ .color_attachment_write_bit = true },
+                        .dst_stage_mask = .{},
                         .dst_access_mask = .{},
                         .old_layout = .attachment_optimal,
                         .new_layout = .present_src_khr,
@@ -395,7 +401,7 @@ pub fn main() !void
                     }
                 },
             }
-        }, in_flight_fence);
+        }, in_flight_fence.handle);
 
         _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{
             .wait_semaphore_count = 1,
@@ -417,8 +423,8 @@ pub fn main() !void
         std.mem.swap(vk.Semaphore, &swapchain.swap_images[result.image_index].image_acquired, &swapchain.next_image_acquired);
         swapchain.image_index = result.image_index;
 
-        _ = try GraphicsContext.self.vkd.waitForFences(GraphicsContext.self.device, 1, @ptrCast([*]const vk.Fence, &in_flight_fence), vk.TRUE, std.math.maxInt(u64));
-        try GraphicsContext.self.vkd.resetFences(GraphicsContext.self.device, 1, @ptrCast([*]const vk.Fence, &in_flight_fence));
+        in_flight_fence.wait();
+        in_flight_fence.reset();
     }
 
     try GraphicsContext.self.vkd.deviceWaitIdle(GraphicsContext.self.device);

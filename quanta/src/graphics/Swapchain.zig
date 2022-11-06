@@ -134,61 +134,6 @@ pub fn currentSwapImage(self: Swapchain) *const SwapImage
     return &self.swap_images[self.image_index];
 }
 
-pub fn present(self: *Swapchain, cmdbuf: vk.CommandBuffer) !PresentState 
-{
-    // Simple method:
-    // 1) Acquire next image
-    // 2) Wait for and reset fence of the acquired image
-    // 3) Submit command buffer with fence of acquired image,
-    //    dependendent on the semaphore signalled by the first step.
-    // 4) Present current frame, dependent on semaphore signalled by previous step
-    // Problem: This way we can't reference the current image while rendering.
-    // Better method: Shuffle the steps around such that acquire next image is the last step,
-    // leaving the swapchain in a state with the current image.
-    // 1) Wait for and reset fence of current image
-    // 2) Submit command buffer, signalling fence of current image and dependent on
-    //    the semaphore signalled by step 4.
-    // 3) Present current frame, dependent on semaphore signalled by the submit
-    // 4) Acquire next image, signalling its semaphore
-    // One problem that arises is that we can't know beforehand which semaphore to signal,
-    // so we keep an extra auxilery semaphore that is swapped around
-
-    // Step 1: Make sure the current frame has finished rendering
-    const current = self.currentSwapImage();
-    // try current.waitForFence(self.context);
-    // try self.context.vkd.resetFences(self.context.device, 1, @ptrCast([*]const vk.Fence, &current.frame_fence));
-
-    // Step 2: Submit the command buffer
-    const wait_stage = [_]vk.PipelineStageFlags{.{ .top_of_pipe_bit = true }};
-    try self.context.vkd.queueSubmit(self.context.graphics_queue, 1, &[_]vk.SubmitInfo{.{
-        .wait_semaphore_count = 1,
-        .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &current.image_acquired),
-        .p_wait_dst_stage_mask = &wait_stage,
-        .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]const vk.CommandBuffer, &cmdbuf),
-        .signal_semaphore_count = 1,
-        .p_signal_semaphores = @ptrCast([*]const vk.Semaphore, &current.render_finished),
-    }}, current.frame_fence);
-
-    // Step 3: Present the current frame
-    _ = try self.context.vkd.queuePresentKHR(self.context.present_queue, &.{
-        .wait_semaphore_count = 1,
-        .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &current.render_finished),
-        .swapchain_count = 1,
-        .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.handle),
-        .p_image_indices = @ptrCast([*]const u32, &self.image_index),
-        .p_results = null,
-    });
-
-    return .optimal;
-
-    //return switch (result.result) {
-    //    .success => .optimal,
-    //    .suboptimal_khr => .suboptimal,
-    //    else => unreachable,
-    //};
-}
-
 pub const SwapImage = struct 
 {
     image: vk.Image,

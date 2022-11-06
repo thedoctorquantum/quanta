@@ -5,5 +5,6 @@ pub const GraphicsPipeline = @import("graphics/GraphicsPipeline.zig");
 pub const Buffer = @import("graphics/Buffer.zig");
 pub const Image = @import("graphics/Image.zig");
 pub const Sampler = @import("graphics/Sampler.zig");
+pub const Fence = @import("graphics/Fence.zig");
 
 pub const vulkan = @import("graphics/vk.zig");

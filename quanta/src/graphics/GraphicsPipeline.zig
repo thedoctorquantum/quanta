@@ -112,8 +112,10 @@ pub fn init(
     options: Options,
     comptime VertexType: ?type,
     comptime PushDataType: ?type,
+    comptime resource_sets: anytype, 
     ) !GraphicsPipeline
 {
+    _ = resource_sets;
     const vertex_binding_descriptions = [_]vk.VertexInputBindingDescription 
     {
         .{ 

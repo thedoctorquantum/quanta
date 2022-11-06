@@ -225,3 +225,32 @@ pub fn drawIndexed(
         first_instance,
     );
 }
+
+pub const DrawIndexedIndirectCount = extern struct
+{
+    index_count: u32,
+    instance_count: u32,
+    first_index: u32,
+    vertex_offset: i32,
+    first_instance: u32, 
+};
+
+pub fn drawIndexedIndirect(
+    self: CommandBuffer,
+    draw_buffer: Buffer,
+    draw_buffer_offset: usize,
+    count_buffer: Buffer,
+    count_buffer_offset: usize,
+    max_draw_count: usize,
+) void 
+{
+    Context.self.vkd.cmdDrawIndexedIndirectCount(
+        self.handle, 
+        draw_buffer.handle, 
+        draw_buffer_offset, 
+        count_buffer.handle, 
+        count_buffer_offset, 
+        @truncate(u32, max_draw_count),
+        @sizeOf(DrawIndexedIndirectCount),
+    );
+}
