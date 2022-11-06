@@ -7,3 +7,6 @@
 [submodule "quanta/lib/mach-glfw"]
 	path = quanta/lib/mach-glfw
 	url = https://github.com/hexops/mach-glfw.git
+[submodule "quanta/lib/zalgebra"]
+	path = quanta/lib/zalgebra
+	url = https://github.com/kooparse/zalgebra.git

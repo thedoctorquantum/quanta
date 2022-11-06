@@ -8,8 +8,8 @@ const quanta = @import("quanta/src/main.zig");
 fn compileShader(builder: *std.build.Builder, mode: std.builtin.Mode, comptime stage: []const u8, comptime source: []const u8, comptime output: []const u8) !void 
 {
     const shader_target = "vulkan1.3";
-    const shader_source_directory = "example/src/shaders/";
-    const shader_binary_directory = "example/src/shaders/spirv/";
+    const shader_source_directory = "quanta/src/renderer/";
+    const shader_binary_directory = "quanta/src/renderer/spirv/";
 
     const shader_optimisation = switch (mode)
     {
@@ -58,6 +58,11 @@ pub fn build(builder: *std.build.Builder) !void
                     {
                         .name = "zigimg",
                         .source = .{ .path = "quanta/lib/zigimg/zigimg.zig" }
+                    },
+                    std.build.Pkg
+                    {
+                        .name = "zalgebra",
+                        .source = .{ .path = "quanta/lib/zalgebra/src/main.zig" }
                     },
                 },
             };

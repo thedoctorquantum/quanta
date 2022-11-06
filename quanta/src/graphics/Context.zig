@@ -112,6 +112,8 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdCopyBufferToImage2 = true,
     .createSampler = true,
     .destroySampler = true,
+    .cmdPushDescriptorSetKHR = true,
+    .cmdDrawIndexedIndirect = true,
 });
 
 var vkGetInstanceProcAddr: vk.PfnGetInstanceProcAddr = undefined;
@@ -402,12 +404,43 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
     const device_extentions = [_][*:0]const u8 
     { 
         vk.extension_info.khr_swapchain.name,
+        vk.extension_info.khr_push_descriptor.name,
     };
 
-    const device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
+    var scalar_block_layout_features = vk.PhysicalDeviceScalarBlockLayoutFeatures
     {
+        .scalar_block_layout = vk.TRUE,
+    };
+
+    var multi_draw_features = vk.PhysicalDeviceMultiDrawFeaturesEXT
+    {
+        .p_next = &scalar_block_layout_features,
+        .multi_draw = vk.TRUE,
+    };
+
+    _ = multi_draw_features;
+
+    var vulkan12_features = vk.PhysicalDeviceVulkan12Features
+    {
+        .p_next = &scalar_block_layout_features,
+        .draw_indirect_count = vk.TRUE,
+    };
+
+    _ = vulkan12_features;
+
+    var device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
+    {
+        .p_next = &scalar_block_layout_features,
         .dynamic_rendering = vk.TRUE, 
         .synchronization_2 = vk.TRUE,
+    };
+
+    const device_features = vk.PhysicalDeviceFeatures2
+    {
+        .features = .{
+            .multi_draw_indirect = vk.TRUE,
+        },
+        .p_next = &device_vulkan13_features,
     };
 
     std.log.info("Required device extensions: {s}", .{ device_extentions });
@@ -638,7 +671,7 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
             .flags = .{},
             .p_queue_create_infos = &queue_create_infos,
             .queue_create_info_count = @intCast(u32, queue_create_infos.len),
-            .p_enabled_features = null,
+            .p_enabled_features = &device_features.features,
             .enabled_extension_count = device_extentions.len,
             .pp_enabled_extension_names = &device_extentions,
             .enabled_layer_count = 0,

@@ -84,8 +84,10 @@ fn getAttributeFormat(comptime T: type) vk.Format
 ///Crude comptime attribute generator from type information, which isn't really sufficient 
 ///but will do the job in most cases 
 ///Also assumes interleaved memory layout
-fn getVertexLayout(comptime T: type) [std.meta.fieldNames(T).len]vk.VertexInputAttributeDescription
+fn getVertexLayout(comptime T: type) [if (T == void) 0 else std.meta.fieldNames(T).len]vk.VertexInputAttributeDescription
 {
+    if (T == void) return [_]vk.VertexInputAttributeDescription {};
+
     std.debug.assert(std.meta.containerLayout(T) == .Extern);
 
     var attributes: [std.meta.fieldNames(T).len]vk.VertexInputAttributeDescription = undefined;
@@ -116,42 +118,60 @@ pub fn init(
     ) !GraphicsPipeline
 {
     _ = resource_sets;
+
     const vertex_binding_descriptions = [_]vk.VertexInputBindingDescription 
     {
         .{ 
             .binding = 0,
-            .stride = @sizeOf(VertexType.?),
+            .stride = if (VertexType != null) @sizeOf(VertexType.?) else 0,
             .input_rate = .vertex,
-        },
+        }, 
     };
 
-    const vertex_attribute_descriptions = getVertexLayout(VertexType orelse unreachable);
+    const vertex_attribute_descriptions = getVertexLayout(VertexType orelse void);
 
-    std.log.debug("Vertex format for {s}: {any}", .{ @typeName(VertexType.?), vertex_attribute_descriptions });
+    if (VertexType != null)
+    {
+        std.log.debug("Vertex format for {s}: {any}", .{ @typeName(VertexType.?), vertex_attribute_descriptions });
+    }
 
-    const descriptor_set_layout_bindings = [1]vk.DescriptorSetLayoutBinding
+    const descriptor_set_layout_bindings = [_]vk.DescriptorSetLayoutBinding
     {
         .{
             .binding = 0,
-            .descriptor_type = .combined_image_sampler,
+            .descriptor_type = .storage_buffer,
             .descriptor_count = 1,
-            .stage_flags = .{ .fragment_bit = true, },
+            .stage_flags = .{ .vertex_bit = true, },
             .p_immutable_samplers = null,
         },
+        // .{
+        //     .binding = 1,
+        //     .descriptor_type = .combined_image_sampler,
+        //     .descriptor_count = 1,
+        //     .stage_flags = .{ .fragment_bit = true, },
+        //     .p_immutable_samplers = null,
+        // },
     };
 
-    const descriptor_pool_sizes = [1]vk.DescriptorPoolSize
+    const descriptor_pool_sizes = [_]vk.DescriptorPoolSize
     {
         .{
-            .@"type" = .combined_image_sampler,
+            .@"type" = .storage_buffer,
             .descriptor_count = 1,
-        }
+        },
+        // .{
+        //     .@"type" = .combined_image_sampler,
+        //     .descriptor_count = 1,
+        // },
     };
 
     const descriptor_set_layout_infos = [1]vk.DescriptorSetLayoutCreateInfo
     {
         .{
-            .flags = .{ .update_after_bind_pool_bit = true },
+            .flags = .{ 
+                // .update_after_bind_pool_bit = true, 
+                // .push_descriptor_bit_khr = true 
+            },
             .binding_count = descriptor_set_layout_bindings.len,
             .p_bindings = &descriptor_set_layout_bindings,
         }
@@ -303,9 +323,9 @@ pub fn init(
                 .p_stages = &shader_stage_infos,
                 .p_vertex_input_state = &.{
                     .flags = .{},
-                    .vertex_binding_description_count = @intCast(u32, vertex_binding_descriptions.len),
+                    .vertex_binding_description_count = if (VertexType != null) @intCast(u32, vertex_binding_descriptions.len) else 0,
                     .p_vertex_binding_descriptions = &vertex_binding_descriptions,
-                    .vertex_attribute_description_count = @intCast(u32, vertex_attribute_descriptions.len),
+                    .vertex_attribute_description_count = if (VertexType != null) @intCast(u32, vertex_attribute_descriptions.len) else 0,
                     .p_vertex_attribute_descriptions = &vertex_attribute_descriptions,
                 },
                 .p_input_assembly_state = &.{

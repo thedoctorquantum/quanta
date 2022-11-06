@@ -43,7 +43,7 @@ pub fn initData(comptime T: type, data: []const T, usage: Usage) !Buffer
         try command_buffer.begin();
         defer command_buffer.end();
 
-        command_buffer.copyBuffer(staging, buffer);
+        command_buffer.copyBuffer(staging, 0, buffer, 0);
     }
 
     try command_buffer.submitAndWait();
@@ -90,7 +90,8 @@ pub fn init(size: usize, usage: Usage) !Buffer
     self.memory = try Context.deviceAllocate(memory_requirements, switch (usage)
     {
         .staging => .{ .host_visible_bit = true, .host_coherent_bit = true },
-        .vertex, .index, .uniform, .storage, .indirect_draw => .{ .device_local_bit = true },
+        .vertex, .index, .uniform, .storage => .{ .device_local_bit = true },
+        .indirect_draw => .{ .host_visible_bit = true, .host_coherent_bit = true },
     });
     errdefer Context.self.vkd.freeMemory(Context.self.device, self.memory, &Context.self.allocation_callbacks);
 
@@ -117,4 +118,29 @@ pub fn map(self: Buffer, comptime T: type) ![]T
 pub fn unmap(self: Buffer) void
 {
     Context.self.vkd.unmapMemory(Context.self.device, self.memory);
+}
+
+pub fn update(self: Buffer, comptime T: type, offset: usize, data: []const T) !void 
+{
+    var staging = try init(data.len * @sizeOf(T), .staging);
+    defer staging.deinit();
+
+    {
+        const mapped_data = try staging.map(T);
+        defer staging.unmap();
+
+        std.mem.copy(T, mapped_data, data);
+    }
+
+    var command_buffer = try CommandBuffer.init(.graphics);
+    defer command_buffer.deinit();
+
+    {
+        try command_buffer.begin();
+        defer command_buffer.end();
+
+        command_buffer.copyBuffer(staging, 0, self, offset);
+    }
+
+    try command_buffer.submitAndWait();
 }

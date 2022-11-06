@@ -152,12 +152,12 @@ pub fn setIndexBuffer(self: CommandBuffer, buffer: Buffer, index_type: IndexType
     });
 }
 
-pub fn copyBuffer(self: CommandBuffer, source: Buffer, destination: Buffer) void 
+pub fn copyBuffer(self: CommandBuffer, source: Buffer, source_offset: usize, destination: Buffer, destination_offset: usize) void 
 {
     const copy_region = vk.BufferCopy 
     {
-        .src_offset = 0,
-        .dst_offset = 0,
+        .src_offset = source_offset,
+        .dst_offset = destination_offset,
         .size = @min(source.size, destination.size),
     };
 
@@ -226,7 +226,7 @@ pub fn drawIndexed(
     );
 }
 
-pub const DrawIndexedIndirectCount = extern struct
+pub const DrawIndexedIndirectCommand = extern struct
 {
     index_count: u32,
     instance_count: u32,
@@ -236,6 +236,22 @@ pub const DrawIndexedIndirectCount = extern struct
 };
 
 pub fn drawIndexedIndirect(
+    self: CommandBuffer,
+    draw_buffer: Buffer,
+    draw_buffer_offset: usize,
+    draw_count: usize,
+) void 
+{
+    Context.self.vkd.cmdDrawIndexedIndirect(
+        self.handle, 
+        draw_buffer.handle, 
+        draw_buffer_offset,
+        @truncate(u32, draw_count),
+        @sizeOf(DrawIndexedIndirectCommand),
+    );
+}
+
+pub fn drawIndexedIndirectCount(
     self: CommandBuffer,
     draw_buffer: Buffer,
     draw_buffer_offset: usize,
@@ -251,6 +267,6 @@ pub fn drawIndexedIndirect(
         count_buffer.handle, 
         count_buffer_offset, 
         @truncate(u32, max_draw_count),
-        @sizeOf(DrawIndexedIndirectCount),
+        @sizeOf(DrawIndexedIndirectCommand),
     );
 }
