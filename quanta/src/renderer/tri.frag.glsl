@@ -5,7 +5,7 @@
 layout(location = 0) in Out
 {
     flat uint material_index;
-    vec4 fragment_color;
+    vec4 color;
     vec2 uv;
 } in_data;
 
@@ -30,5 +30,5 @@ void main()
 
     vec4 albedo = unpackUnorm4x8(material.albedo_color) * texture(samplers[nonuniformEXT(material.albedo_index)], in_data.uv);
 
-    output_color = in_data.fragment_color * albedo;
+    output_color = in_data.color * albedo;
 }

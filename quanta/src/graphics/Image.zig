@@ -12,6 +12,7 @@ memory: vk.DeviceMemory,
 size: usize,
 format: vk.Format,
 layout: vk.ImageLayout,
+aspect_mask: vk.ImageAspectFlags,
 width: u32,
 height: u32,
 depth: u32,
@@ -71,7 +72,7 @@ pub fn initData(
                     .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                     .image = image.handle,
                     .subresource_range = .{
-                        .aspect_mask = .{ .color_bit = true },
+                        .aspect_mask = image.aspect_mask,
                         .base_mip_level = 0,
                         .level_count = vk.REMAINING_MIP_LEVELS,
                         .base_array_layer = 0,
@@ -107,6 +108,10 @@ pub fn init(
         .width = width,
         .height = height,
         .depth = depth,
+        .aspect_mask = .{
+            .color_bit = format != vk.Format.d32_sfloat,
+            .depth_bit = format == vk.Format.d32_sfloat,
+        },
         .size = 0,
     };
 
@@ -121,7 +126,7 @@ pub fn init(
             .array_layers = 1,
             .samples = .{ .@"1_bit" = true, },
             .tiling = .optimal,
-            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, },
+            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .depth_stencil_attachment_bit = self.aspect_mask.depth_bit },
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
@@ -149,7 +154,7 @@ pub fn init(
             .format = self.format,
             .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
             .subresource_range = .{
-                .aspect_mask = .{ .color_bit = true },
+                .aspect_mask = self.aspect_mask,
                 .base_mip_level = 0,
                 .level_count = 1,
                 .base_array_layer = 0,
@@ -191,7 +196,7 @@ pub fn init(
                     .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                     .image = self.handle,
                     .subresource_range = .{
-                        .aspect_mask = .{ .color_bit = true },
+                        .aspect_mask = self.aspect_mask,
                         .base_mip_level = 0,
                         .level_count = vk.REMAINING_MIP_LEVELS,
                         .base_array_layer = 0,

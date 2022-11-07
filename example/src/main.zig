@@ -204,7 +204,7 @@ pub fn main() !void
             Renderer3D.drawMesh(second_mesh, material2, quanta.math.zalgebra.Mat4.fromRotation(
                 y_offset * 60,
                 .{  
-                    .data = .{ 0, 0, 1 }
+                    .data = .{ 1, 0, 0 }
                 }
             ));
         }

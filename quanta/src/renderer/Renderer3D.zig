@@ -13,15 +13,17 @@ const tri_frag_spv = @alignCast(4, @embedFile("spirv/tri.frag.spv"));
 
 const ColorPassPushConstants = extern struct 
 {
-    position: [3]f32,
+    view_projection: [4][4]f32,
 };
 
 pub var self: Renderer3D = undefined;
 
 allocator: std.mem.Allocator,
 swapchain: *graphics.Swapchain,
+depth_image: graphics.Image,
 command_buffers: []graphics.CommandBuffer, 
 frame_fence: graphics.Fence,
+
 vertex_buffer: graphics.Buffer,
 vertex_offset: usize,
 index_buffer: graphics.Buffer,
@@ -44,6 +46,9 @@ material_indices_buffer: graphics.Buffer,
 materials: std.ArrayListUnmanaged(Material),
 materials_buffer: graphics.Buffer,
 
+albedo_images: std.ArrayListUnmanaged(Image),
+albedo_samplers: std.ArrayListUnmanaged(Sampler),
+
 pub fn init(
     allocator: std.mem.Allocator,
     swapchain: *graphics.Swapchain
@@ -54,8 +59,17 @@ pub fn init(
     self.draw_index = 0;
     self.vertex_offset = 0;
     self.index_offset = 0;
+
+    self.depth_image = try Image.init(640, 480, 1, vk.Format.d32_sfloat, vk.ImageLayout.attachment_optimal);
+    errdefer self.depth_image.deinit();
+
     self.command_buffers = try allocator.alloc(graphics.CommandBuffer, swapchain.swap_images.len);
     errdefer allocator.free(self.command_buffers);
+
+    self.transforms = .{};
+    self.materials = .{};
+    self.albedo_images = .{};
+    self.albedo_samplers = .{};
 
     for (self.command_buffers) |*command_buffer|
     {
@@ -91,6 +105,7 @@ pub fn init(
             {
                 swapchain.surface_format.format,
             },
+            .depth_attachment_format = self.depth_image.format,
             .vertex_shader_binary = tri_vert_spv,
             .fragment_shader_binary = tri_frag_spv,
         },
@@ -192,6 +207,7 @@ pub fn deinit() void
 {
     defer self = undefined;
     defer self.allocator.free(self.command_buffers);
+    defer self.depth_image.deinit();
     defer for (self.command_buffers) |*command_buffer|
     {
         command_buffer.deinit();
@@ -203,7 +219,21 @@ pub fn deinit() void
     defer self.color_pipeline.deinit();
     defer self.meshes.deinit(self.allocator);
     defer self.transforms_buffer.deinit();
+    defer self.material_indices_buffer.deinit();
+    defer self.materials.deinit(self.allocator);
+    defer self.materials_buffer.deinit();
     defer self.transforms.deinit(self.allocator);
+    defer self.albedo_images.deinit(self.allocator);
+    defer self.material_indices.deinit(self.allocator);
+    defer for (self.albedo_images.items) |*image|
+    {
+        image.deinit();
+    };
+    defer self.albedo_samplers.deinit(self.allocator);
+    defer for (self.albedo_samplers.items) |*sampler|
+    {
+        sampler.deinit();
+    };
 }
 
 pub fn beginRender() void 
@@ -256,6 +286,37 @@ pub fn endRender() !void
             }
         );
 
+        GraphicsContext.self.vkd.cmdPipelineBarrier2(
+            command_buffer.handle, 
+            &.{
+                .dependency_flags = .{ .by_region_bit = true, },
+                .memory_barrier_count = 0,
+                .p_memory_barriers = undefined,
+                .buffer_memory_barrier_count = 0,
+                .p_buffer_memory_barriers = undefined,
+                .image_memory_barrier_count = 1,
+                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+                {
+                    .src_stage_mask = .{ .all_commands_bit = true },
+                    .src_access_mask = .{},
+                    .dst_stage_mask = .{ .color_attachment_output_bit = true },
+                    .dst_access_mask = .{ .color_attachment_write_bit = true },
+                    .old_layout = .@"undefined",
+                    .new_layout = .attachment_optimal,
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .image = self.depth_image.handle,
+                    .subresource_range = .{
+                        .aspect_mask = .{ .depth_bit = true },
+                        .base_mip_level = 0,
+                        .level_count = vk.REMAINING_MIP_LEVELS,
+                        .base_array_layer = 0,
+                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                    },
+                }),
+            }
+        );
+
         //Color pass #1
         {
             const viewport = vk.Viewport
@@ -290,6 +351,23 @@ pub fn endRender() !void
                 },
             };
 
+            const depth_attachment = vk.RenderingAttachmentInfo
+            {
+                .image_view = self.depth_image.view,
+                .image_layout = .attachment_optimal,
+                .resolve_mode = .{},
+                .resolve_image_view = .null_handle,
+                .resolve_image_layout = .@"undefined",
+                .load_op = .clear,
+                .store_op = .dont_care,
+                .clear_value = .{ 
+                    .depth_stencil = .{ 
+                        .depth = 1,
+                        .stencil = 1,
+                    },
+                },
+            };
+
             GraphicsContext.self.vkd.cmdBeginRendering(command_buffer.handle, &.{
                 .flags = .{},
                 .render_area = .{ 
@@ -300,7 +378,7 @@ pub fn endRender() !void
                 .view_mask = 0,
                 .color_attachment_count = 1,
                 .p_color_attachments = @ptrCast([*]const @TypeOf(color_attachment), &color_attachment),
-                .p_depth_attachment = null,
+                .p_depth_attachment = &depth_attachment,
                 .p_stencil_attachment = null,
             });
             defer GraphicsContext.self.vkd.cmdEndRendering(command_buffer.handle);
@@ -308,9 +386,14 @@ pub fn endRender() !void
             GraphicsContext.self.vkd.cmdSetViewport(command_buffer.handle, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
             GraphicsContext.self.vkd.cmdSetScissor(command_buffer.handle, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
 
+            const projection = zalgebra.perspective(60, 640 / 480, 0.01, 1000);
+            const view_projection = projection.mul(zalgebra.lookAt(.{ .data = .{ 0, 0, 5 } }, zalgebra.Vec3.add(.{ .data = .{ 0, 0, 0 } }, .{ .data = .{ 0, 0, 0 } }), .{ .data = .{ 0, 1, 0 } }));
+
             command_buffer.setGraphicsPipeline(self.color_pipeline);
             command_buffer.setIndexBuffer(self.index_buffer, .u32);
-            command_buffer.setPushData(ColorPassPushConstants, .{ .position = .{ 0, 0, 0 } });
+            command_buffer.setPushData(ColorPassPushConstants, .{
+                .view_projection = view_projection.data,
+            });
 
             GraphicsContext.self.vkd.cmdBindDescriptorSets(
                 command_buffer.handle, 
@@ -508,8 +591,14 @@ pub fn createMaterial(
         .r8g8b8a8_srgb, 
         vk.ImageLayout.shader_read_only_optimal
     );
+    errdefer albedo_image.deinit();
+
+    try self.albedo_images.append(self.allocator, albedo_image);
 
     var albedo_sampler = try Sampler.init();
+    errdefer albedo_sampler.deinit();
+    
+    try self.albedo_samplers.append(self.allocator, albedo_sampler);
 
     std.log.debug("Created material {}", .{ material_handle });
 
