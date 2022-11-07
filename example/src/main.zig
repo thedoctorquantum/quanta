@@ -99,18 +99,8 @@ pub fn main() !void
     const tileset_import = try png.import(allocator, @embedFile("assets/tileset.png"));
     defer allocator.free(tileset_import.data);
 
-    var test_texture_image: Image = try Image.initData(
-        tileset_import.data, 
-        tileset_import.width, 
-        tileset_import.height, 
-        1, 
-        .r8g8b8a8_srgb, 
-        vk.ImageLayout.shader_read_only_optimal
-    );
-    defer test_texture_image.deinit();
-
-    var test_texture_sampler = try Sampler.init();
-    defer test_texture_sampler.deinit();
+    const wood_floor_import = try png.import(allocator, @embedFile("assets/wood_floor.png"));
+    defer allocator.free(wood_floor_import.data);
 
     const triangle_mesh = try Renderer3D.createMesh(
         &[_]Renderer3D.Vertex
@@ -137,10 +127,46 @@ pub fn main() !void
         &[_]u32 { 0, 1, 2 },
     );
 
-    // const time_start = std.time.milliTimestamp();
+    const second_mesh = try Renderer3D.createMesh(
+        &[_]Renderer3D.Vertex
+        {
+            .{  
+                .position = .{ 0.5, 0.5, 0 },
+                .normal = .{ 0, 0, 0 },
+                .color = packUnorm4x8(.{ 1, 1, 1, 1}),
+                .uv = .{ 0, 0 },
+            },
+            .{  
+                .position = .{ -0.5, 0.5, 0 },
+                .normal = .{ 0, 0, 0 },
+                .color = packUnorm4x8(.{ 1, 1, 1, 1}),
+                .uv = .{ 1, 0 },
+            },
+            .{  
+                .position = .{ 0, -0.5, 0 },
+                .normal = .{ 0, 0, 0 },
+                .color = packUnorm4x8(.{ 1, 1, 1, 1}),
+                .uv = .{ 0.5, 1 },
+            },
+        }, 
+        &[_]u32 { 0, 1, 2 },
+    );
 
-    var in_flight_fence = try graphics.Fence.init();
-    defer in_flight_fence.deinit();
+    const material2 = try Renderer3D.createMaterial(
+        wood_floor_import.data, 
+        wood_floor_import.width, 
+        wood_floor_import.height, 
+        .{ 1, 0.4, 0.4, 1 }
+    );
+
+    const material = try Renderer3D.createMaterial(
+        tileset_import.data, 
+        tileset_import.width, 
+        tileset_import.height, 
+        .{ 1, 1, 1, 1 }
+    );
+
+    const time_start = std.time.milliTimestamp();
 
     const target_frame_time: i64 = 16; 
 
@@ -161,215 +187,27 @@ pub fn main() !void
             }
         }
 
+        const time = std.time.milliTimestamp() - time_start;
+
         {
             Renderer3D.beginRender();
             defer Renderer3D.endRender() catch unreachable;
 
-            Renderer3D.drawMesh(triangle_mesh);
+            const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
+
+            Renderer3D.drawMesh(triangle_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
+                .{  
+                    .data = .{ 0, y_offset, 0 }
+                }
+            ));
+
+            Renderer3D.drawMesh(second_mesh, material2, quanta.math.zalgebra.Mat4.fromRotation(
+                y_offset * 60,
+                .{  
+                    .data = .{ 0, 0, 1 }
+                }
+            ));
         }
-
-        // //record commands
-        // {
-        //     const viewport = vk.Viewport
-        //     {
-        //         .x = 0,
-        //         .y = 0,
-        //         .width = @intToFloat(f32, 640),
-        //         .height = @intToFloat(f32, 480),
-        //         .min_depth = 0,
-        //         .max_depth = 1,
-        //     };
-
-        //     const scissor = vk.Rect2D
-        //     {
-        //         .offset = .{ .x = 0, .y = 0 },
-        //         .extent = .{ .width = 640, .height = 480 },
-        //     };
-
-        //     try cmdbuf.begin();
-        //     defer cmdbuf.end();
-
-        //     GraphicsContext.self.vkd.cmdPipelineBarrier2(
-        //         cmdbuf.handle, 
-        //         &.{
-        //             .dependency_flags = .{ .by_region_bit = true, },
-        //             .memory_barrier_count = 0,
-        //             .p_memory_barriers = undefined,
-        //             .buffer_memory_barrier_count = 0,
-        //             .p_buffer_memory_barriers = undefined,
-        //             .image_memory_barrier_count = 1,
-        //             .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-        //             {
-        //                 .src_stage_mask = .{ .all_commands_bit = true },
-        //                 .src_access_mask = .{},
-        //                 .dst_stage_mask = .{ .color_attachment_output_bit = true },
-        //                 .dst_access_mask = .{ .color_attachment_write_bit = true },
-        //                 .old_layout = .@"undefined",
-        //                 .new_layout = .attachment_optimal,
-        //                 .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-        //                 .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-        //                 .image = image.image,
-        //                 .subresource_range = .{
-        //                     .aspect_mask = .{ .color_bit = true },
-        //                     .base_mip_level = 0,
-        //                     .level_count = vk.REMAINING_MIP_LEVELS,
-        //                     .base_array_layer = 0,
-        //                     .layer_count = vk.REMAINING_ARRAY_LAYERS,
-        //                 },
-        //             }),
-        //         }
-        //     );
-            
-        //     //Render pass #1
-        //     {
-        //         const time = @intToFloat(f32, std.time.milliTimestamp() - time_start);
-
-        //         const sin = std.math.sin(time * 0.001);
-
-        //         const color_attachment = vk.RenderingAttachmentInfo
-        //         {
-        //             .image_view = image.view,
-        //             .image_layout = .attachment_optimal,
-        //             .resolve_mode = .{},
-        //             .resolve_image_view = .null_handle,
-        //             .resolve_image_layout = .@"undefined",
-        //             .load_op = .clear,
-        //             .store_op = .store,
-        //             .clear_value = .{ 
-        //                 .color = .{ 
-        //                     .float_32 = .{ 0, 0.2, std.math.fabs(sin), 1 },
-        //                 },
-        //             },
-        //         };
-
-        //         GraphicsContext.self.vkd.cmdBeginRendering(cmdbuf.handle, &.{
-        //             .flags = .{},
-        //             .render_area = .{ 
-        //                 .offset = .{ .x = 0, .y = 0 }, 
-        //                 .extent = .{ .width = 640, .height = 480 } 
-        //             },
-        //             .layer_count = 1,
-        //             .view_mask = 0,
-        //             .color_attachment_count = 1,
-        //             .p_color_attachments = @ptrCast([*]const @TypeOf(color_attachment), &color_attachment),
-        //             .p_depth_attachment = null,
-        //             .p_stencil_attachment = null,
-        //         });
-        //         defer GraphicsContext.self.vkd.cmdEndRendering(cmdbuf.handle);
-
-        //         GraphicsContext.self.vkd.cmdSetViewport(cmdbuf.handle, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
-        //         GraphicsContext.self.vkd.cmdSetScissor(cmdbuf.handle, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
-
-        //         cmdbuf.setGraphicsPipeline(pipeline);
-        //         cmdbuf.setIndexBuffer(index_buffer, .u16);
-        //         cmdbuf.setPushData(shaders.TriVertPushConstants, .{ .position = .{ sin, 0, 0 } });
-
-        //         GraphicsContext.self.vkd.cmdBindDescriptorSets(
-        //             cmdbuf.handle, 
-        //             .graphics,
-        //             cmdbuf.pipeline_layout, 
-        //             0, 
-        //             1, 
-        //             pipeline.descriptor_sets.ptr, 
-        //             0, 
-        //             undefined
-        //         );
-
-        //         cmdbuf.drawIndexed(3, 1, 0, 0, 0);
-        //     }
-            
-        //     GraphicsContext.self.vkd.cmdPipelineBarrier2(
-        //         cmdbuf.handle, 
-        //         &.{
-        //             .dependency_flags = .{ .by_region_bit = true, },
-        //             .memory_barrier_count = 0,
-        //             .p_memory_barriers = undefined,
-        //             .buffer_memory_barrier_count = 0,
-        //             .p_buffer_memory_barriers = undefined,
-        //             .image_memory_barrier_count = 1,
-        //             .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-        //             {
-        //                 .src_stage_mask = .{ .color_attachment_output_bit = true },
-        //                 .src_access_mask = .{ .color_attachment_write_bit = true },
-        //                 .dst_stage_mask = .{},
-        //                 .dst_access_mask = .{},
-        //                 .old_layout = .attachment_optimal,
-        //                 .new_layout = .present_src_khr,
-        //                 .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-        //                 .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-        //                 .image = image.image,
-        //                 .subresource_range = .{
-        //                     .aspect_mask = .{ .color_bit = true },
-        //                     .base_mip_level = 0,
-        //                     .level_count = vk.REMAINING_MIP_LEVELS,
-        //                     .base_array_layer = 0,
-        //                     .layer_count = vk.REMAINING_ARRAY_LAYERS,
-        //                 },
-        //             }),
-        //         }
-        //     );
-        // }
-
-        // try GraphicsContext.self.vkd.queueSubmit2(GraphicsContext.self.graphics_queue, 1, &[_]vk.SubmitInfo2
-        // {
-        //     .{
-        //         .flags = .{},
-        //         .wait_semaphore_info_count = 1,
-        //         .p_wait_semaphore_infos = &[_]vk.SemaphoreSubmitInfo 
-        //         {
-        //             .{
-        //                 .semaphore = image.image_acquired,
-        //                 .value = 0,
-        //                 .stage_mask = .{
-        //                     .color_attachment_output_bit = true,
-        //                 },
-        //                 .device_index = 0,
-        //             }
-        //         },
-        //         .command_buffer_info_count = 1,
-        //         .p_command_buffer_infos = &[_]vk.CommandBufferSubmitInfo {
-        //             .{
-        //                 .command_buffer = cmdbuf.handle,
-        //                 .device_mask = 0,
-        //             }
-        //         },
-        //         .signal_semaphore_info_count = 1,
-        //         .p_signal_semaphore_infos = &[_]vk.SemaphoreSubmitInfo 
-        //         {
-        //             .{
-        //                 .semaphore = image.render_finished,
-        //                 .value = 0,
-        //                 .stage_mask = .{
-        //                     .color_attachment_output_bit = true,
-        //                 },
-        //                 .device_index = 0,
-        //             }
-        //         },
-        //     }
-        // }, in_flight_fence.handle);
-
-        // _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{
-        //     .wait_semaphore_count = 1,
-        //     .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &image.render_finished),
-        //     .swapchain_count = 1,
-        //     .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &swapchain.handle),
-        //     .p_image_indices = @ptrCast([*]const u32, &image_index),
-        //     .p_results = null,
-        // });
-
-        // const result = try GraphicsContext.self.vkd.acquireNextImageKHR(
-        //     GraphicsContext.self.device,
-        //     swapchain.handle,
-        //     std.math.maxInt(u64),
-        //     swapchain.next_image_acquired,
-        //     .null_handle,
-        // );
-
-        // std.mem.swap(vk.Semaphore, &swapchain.swap_images[result.image_index].image_acquired, &swapchain.next_image_acquired);
-        // swapchain.image_index = result.image_index;
-
-        // in_flight_fence.wait();
-        // in_flight_fence.reset();
     }
 
     try GraphicsContext.self.vkd.deviceWaitIdle(GraphicsContext.self.device);

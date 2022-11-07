@@ -3,7 +3,10 @@ const Renderer3D = @This();
 const std = @import("std");
 const graphics = @import("../graphics.zig");
 const GraphicsContext = graphics.Context;
+const Image = graphics.Image;
+const Sampler = graphics.Sampler;
 const vk = graphics.vulkan;
+const zalgebra = @import("zalgebra");
 
 const tri_vert_spv = @alignCast(4, @embedFile("spirv/tri.vert.spv"));
 const tri_frag_spv = @alignCast(4, @embedFile("spirv/tri.frag.spv"));
@@ -31,7 +34,15 @@ draws: []graphics.CommandBuffer.DrawIndexedIndirectCommand,
 draw_index: u32,
 
 meshes: std.ArrayListUnmanaged(Mesh),
-next_mesh: u32,
+
+transforms: std.ArrayListUnmanaged([4][4]f32),
+transforms_buffer: graphics.Buffer,
+
+material_indices: std.ArrayListUnmanaged(u32),
+material_indices_buffer: graphics.Buffer,
+
+materials: std.ArrayListUnmanaged(Material),
+materials_buffer: graphics.Buffer,
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -41,7 +52,6 @@ pub fn init(
     self.allocator = allocator;
     self.swapchain = swapchain;
     self.draw_index = 0;
-    self.next_mesh = 0;
     self.vertex_offset = 0;
     self.index_offset = 0;
     self.command_buffers = try allocator.alloc(graphics.CommandBuffer, swapchain.swap_images.len);
@@ -90,9 +100,18 @@ pub fn init(
     );
     errdefer self.color_pipeline.deinit();
 
+    self.transforms_buffer = try graphics.Buffer.init(command_count * @sizeOf([4][4]f32), .storage);
+    errdefer self.transforms_buffer.deinit();
+
+    self.material_indices_buffer = try graphics.Buffer.init(command_count * @sizeOf(u32), .storage);
+    errdefer self.material_indices_buffer.deinit();
+
+    self.materials_buffer = try graphics.Buffer.init(command_count * @sizeOf(Material), .storage);
+    errdefer self.materials_buffer.deinit();
+
     GraphicsContext.self.vkd.updateDescriptorSets(
         GraphicsContext.self.device, 
-        1, 
+        4, 
         &[_]vk.WriteDescriptorSet
         {
             .{
@@ -112,23 +131,57 @@ pub fn init(
                 },
                 .p_texel_buffer_view = undefined,
             },
-            // .{
-            //     .dst_set = self.color_pipeline.descriptor_sets[0],
-            //     .dst_binding = 1,
-            //     .dst_array_element = 0,
-            //     .descriptor_count = 1,
-            //     .descriptor_type = .combined_image_sampler,
-            //     .p_image_info = &[_]vk.DescriptorImageInfo
-            //     {
-            //         .{
-            //             .sampler = .null_handle,
-            //             .image_view = .null_handle,
-            //             .image_layout = undefined,
-            //         },
-            //     },
-            //     .p_buffer_info = undefined,
-            //     .p_texel_buffer_view = undefined,
-            // },
+            .{
+                .dst_set = self.color_pipeline.descriptor_sets[0],
+                .dst_binding = 1,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = &[_]vk.DescriptorBufferInfo
+                {
+                    .{
+                        .buffer = self.transforms_buffer.handle,
+                        .offset = 0,
+                        .range = self.transforms_buffer.size,
+                    }
+                },
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = self.color_pipeline.descriptor_sets[0],
+                .dst_binding = 2,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = &[_]vk.DescriptorBufferInfo
+                {
+                    .{
+                        .buffer = self.material_indices_buffer.handle,
+                        .offset = 0,
+                        .range = self.material_indices_buffer.size,
+                    }
+                },
+                .p_texel_buffer_view = undefined,
+            },
+            .{
+                .dst_set = self.color_pipeline.descriptor_sets[0],
+                .dst_binding = 3,
+                .dst_array_element = 0,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_buffer,
+                .p_image_info = undefined,
+                .p_buffer_info = &[_]vk.DescriptorBufferInfo
+                {
+                    .{
+                        .buffer = self.materials_buffer.handle,
+                        .offset = 0,
+                        .range = self.materials_buffer.size,
+                    }
+                },
+                .p_texel_buffer_view = undefined,
+            },
         }, 
         0, 
         undefined,
@@ -149,6 +202,8 @@ pub fn deinit() void
     defer self.index_buffer.deinit();
     defer self.color_pipeline.deinit();
     defer self.meshes.deinit(self.allocator);
+    defer self.transforms_buffer.deinit();
+    defer self.transforms.deinit(self.allocator);
 }
 
 pub fn beginRender() void 
@@ -161,6 +216,10 @@ pub fn endRender() !void
     const image_index = self.swapchain.image_index;
     const image = self.swapchain.swap_images[image_index];
     const command_buffer = &self.command_buffers[image_index];
+
+    try self.transforms_buffer.update([4][4]f32, 0, self.transforms.items);
+    try self.material_indices_buffer.update(u32, 0, self.material_indices.items);
+    try self.materials_buffer.update(Material, 0, self.materials.items);
 
     {
         command_buffer.begin() catch unreachable;
@@ -267,7 +326,7 @@ pub fn endRender() !void
             command_buffer.drawIndexedIndirect(
                 self.draw_indirect_buffer, 
                 0, 
-                self.draws.len
+                self.draw_index
             );
         }
 
@@ -363,32 +422,27 @@ pub fn endRender() !void
 
     self.frame_fence.wait();
     self.frame_fence.reset();
+
+    self.transforms.clearRetainingCapacity();
+    self.material_indices.clearRetainingCapacity();
 }
 
-pub const Mesh = extern struct 
+const Mesh = extern struct 
 {
     vertex_offset: u32,
     vertex_count: u32,
     index_offset: u32,
     index_count: u32,
 };
-pub const MeshHandle = enum(u32) { _ }; 
 
-pub const Vertex = extern struct 
-{
-    position: [3]f32,
-    normal: [3]f32,
-    color: u32,
-    uv: [2]f32,
-};
+pub const MeshHandle = enum(u32) { _ }; 
 
 pub fn createMesh(
     vertices: []const Vertex,
     indices: []const u32,
 ) !MeshHandle
 {
-    const mesh_handle = self.next_mesh;
-    self.next_mesh += 1;
+    const mesh_handle = @intCast(u32, self.meshes.items.len);
 
     try self.meshes.append(self.allocator, .{
         .vertex_offset = @intCast(u32, self.vertex_offset),
@@ -406,8 +460,106 @@ pub fn createMesh(
     return @intToEnum(MeshHandle, mesh_handle);
 }
 
+const Material = extern struct 
+{
+    albedo_texture_index: u32,
+    albedo_color: u32,
+};
+
+pub const MaterialHandle = enum(u32) { _ };
+
+fn packUnorm4x8(v: [4]f32) u32
+{
+    const Unorm4x8 = packed struct(u32)
+    {
+        x: u8,
+        y: u8,
+        z: u8,
+        w: u8,
+    };
+
+    const x = @floatToInt(u8, v[0] * @intToFloat(f32, std.math.maxInt(u8)));
+    const y = @floatToInt(u8, v[1] * @intToFloat(f32, std.math.maxInt(u8)));
+    const z = @floatToInt(u8, v[2] * @intToFloat(f32, std.math.maxInt(u8)));
+    const w = @floatToInt(u8, v[3] * @intToFloat(f32, std.math.maxInt(u8)));
+
+    return @bitCast(u32, Unorm4x8 {
+        .x = x,
+        .y = y,
+        .z = z, 
+        .w = w,
+    });
+}
+
+pub fn createMaterial(
+    albedo_texture_data: []const u8,
+    albedo_texture_width: u32,
+    albedo_texture_height: u32,
+    albedo_color: [4]f32,
+) !MaterialHandle 
+{
+    const material_handle = @intCast(u32, self.materials.items.len);
+
+    var albedo_image = try Image.initData(
+        albedo_texture_data, 
+        albedo_texture_width, 
+        albedo_texture_height, 
+        1, 
+        .r8g8b8a8_srgb, 
+        vk.ImageLayout.shader_read_only_optimal
+    );
+
+    var albedo_sampler = try Sampler.init();
+
+    std.log.debug("Created material {}", .{ material_handle });
+
+    GraphicsContext.self.vkd.updateDescriptorSets(
+        GraphicsContext.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = self.color_pipeline.descriptor_sets[0],
+                .dst_binding = 4,
+                .dst_array_element = material_handle,
+                .descriptor_count = 1,
+                .descriptor_type = .combined_image_sampler,
+                .p_image_info = &[_]vk.DescriptorImageInfo 
+                {
+                    .{
+                        .sampler = albedo_sampler.handle,
+                        .image_view = albedo_image.view,
+                        .image_layout = albedo_image.layout,
+                    }
+                },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        }, 
+        0, 
+        undefined,
+    );
+
+    try self.materials.append(self.allocator, .{
+        .albedo_texture_index = material_handle,
+        .albedo_color = packUnorm4x8(albedo_color)
+    });
+
+    return @intToEnum(MaterialHandle, material_handle);
+}
+
+pub const Vertex = extern struct 
+{
+    position: [3]f32,
+    normal: [3]f32,
+    color: u32,
+    uv: [2]f32,
+};
+
 pub fn drawMesh(
     mesh: MeshHandle,
+    material: MaterialHandle,
+    transform: zalgebra.Mat4x4(f32),
 ) void 
 {
     const mesh_data: Mesh = self.meshes.items[@enumToInt(mesh)];
@@ -415,9 +567,20 @@ pub fn drawMesh(
     self.draws[self.draw_index] = .{
         .first_index = mesh_data.index_offset / @sizeOf(u32),
         .index_count = mesh_data.index_count,
-        .vertex_offset = @intCast(i32, mesh_data.vertex_offset),
+        .vertex_offset = @intCast(i32, mesh_data.vertex_offset / @sizeOf(Vertex)),
         .first_instance = 0, 
         .instance_count = 1,
     };
+
+    self.transforms.append(
+        self.allocator,
+        transform.data
+    ) catch unreachable;
+
+    self.material_indices.append(
+        self.allocator, 
+        @enumToInt(material)
+    ) catch unreachable;
+
     self.draw_index += 1;
 }

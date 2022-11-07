@@ -29,14 +29,21 @@ pub fn import(allocator: std.mem.Allocator, data: []const u8) !Import
 
     self.data = try allocator.alloc(u8, 4 * image.width * image.height);
 
-    for (image.pixels.rgb24) |pixel, i|
+    if (image.pixelFormat() == .rgb24)
     {
-        const write_pixel = @ptrCast(*img.color.Rgba32, self.data.ptr + (i * @sizeOf(img.color.Rgba32)));
+        for (image.pixels.rgb24) |pixel, i|
+        {
+            const write_pixel = @ptrCast(*img.color.Rgba32, self.data.ptr + (i * @sizeOf(img.color.Rgba32)));
 
-        write_pixel.r = pixel.r;
-        write_pixel.g = pixel.g;
-        write_pixel.b = pixel.b;
-        write_pixel.a = 255;
+            write_pixel.r = pixel.r;
+            write_pixel.g = pixel.g;
+            write_pixel.b = pixel.b;
+            write_pixel.a = 255;
+        }
+    }
+    else 
+    { 
+        std.mem.copy(u8, self.data, image.pixels.asBytes());
     }
 
     return self;

@@ -144,13 +144,43 @@ pub fn init(
             .stage_flags = .{ .vertex_bit = true, },
             .p_immutable_samplers = null,
         },
-        // .{
-        //     .binding = 1,
-        //     .descriptor_type = .combined_image_sampler,
-        //     .descriptor_count = 1,
-        //     .stage_flags = .{ .fragment_bit = true, },
-        //     .p_immutable_samplers = null,
-        // },
+        .{
+            .binding = 1,
+            .descriptor_type = .storage_buffer,
+            .descriptor_count = 1,
+            .stage_flags = .{ .vertex_bit = true, },
+            .p_immutable_samplers = null,
+        },
+        .{
+            .binding = 2,
+            .descriptor_type = .storage_buffer,
+            .descriptor_count = 1,
+            .stage_flags = .{ .vertex_bit = true, },
+            .p_immutable_samplers = null,
+        },
+        .{
+            .binding = 3,
+            .descriptor_type = .storage_buffer,
+            .descriptor_count = 1,
+            .stage_flags = .{ .fragment_bit = true, },
+            .p_immutable_samplers = null,
+        },
+        .{
+            .binding = 4,
+            .descriptor_type = .combined_image_sampler,
+            .descriptor_count = 16000,
+            .stage_flags = .{ .fragment_bit = true, },
+            .p_immutable_samplers = null,
+        },
+    };
+
+    const descriptor_set_layout_binding_flags = [_]vk.DescriptorBindingFlags
+    {
+        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
+        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
+        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
+        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
+        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
     };
 
     const descriptor_pool_sizes = [_]vk.DescriptorPoolSize
@@ -159,19 +189,37 @@ pub fn init(
             .@"type" = .storage_buffer,
             .descriptor_count = 1,
         },
-        // .{
-        //     .@"type" = .combined_image_sampler,
-        //     .descriptor_count = 1,
-        // },
+        .{
+            .@"type" = .storage_buffer,
+            .descriptor_count = 1,
+        },
+        .{
+            .@"type" = .storage_buffer,
+            .descriptor_count = 1,
+        },
+        .{
+            .@"type" = .storage_buffer,
+            .descriptor_count = 1,
+        },
+                .{
+            .@"type" = .storage_buffer,
+            .descriptor_count = 1,
+        },
+        .{
+            .@"type" = .combined_image_sampler,
+            .descriptor_count = 16000,
+        }
     };
 
     const descriptor_set_layout_infos = [1]vk.DescriptorSetLayoutCreateInfo
     {
         .{
-            .flags = .{ 
-                // .update_after_bind_pool_bit = true, 
-                // .push_descriptor_bit_khr = true 
+            .p_next = &vk.DescriptorSetLayoutBindingFlagsCreateInfo
+            {
+                .binding_count = descriptor_set_layout_binding_flags.len,
+                .p_binding_flags = &descriptor_set_layout_binding_flags,
             },
+            .flags = .{ .update_after_bind_pool_bit = true, },
             .binding_count = descriptor_set_layout_bindings.len,
             .p_bindings = &descriptor_set_layout_bindings,
         }
@@ -195,7 +243,7 @@ pub fn init(
     };
 
     self.descriptor_pool = try Context.self.vkd.createDescriptorPool(Context.self.device, &.{
-        .flags = .{ .update_after_bind_bit = true },
+        .flags = .{ .update_after_bind_bit = true,  },
         .max_sets = 1,
         .pool_size_count = 1,
         .p_pool_sizes = &descriptor_pool_sizes,

@@ -412,35 +412,51 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         .scalar_block_layout = vk.TRUE,
     };
 
-    var multi_draw_features = vk.PhysicalDeviceMultiDrawFeaturesEXT
+    var draw_parameters = vk.PhysicalDeviceShaderDrawParametersFeatures
     {
         .p_next = &scalar_block_layout_features,
-        .multi_draw = vk.TRUE,
+        .shader_draw_parameters = vk.TRUE,
     };
 
-    _ = multi_draw_features;
-
-    var vulkan12_features = vk.PhysicalDeviceVulkan12Features
+    var descriptor_indexing = vk.PhysicalDeviceDescriptorIndexingFeatures
     {
-        .p_next = &scalar_block_layout_features,
-        .draw_indirect_count = vk.TRUE,
+        .p_next = &draw_parameters,
+        .shader_input_attachment_array_dynamic_indexing = vk.TRUE,
+        .shader_uniform_texel_buffer_array_dynamic_indexing = vk.TRUE,
+        .shader_storage_texel_buffer_array_dynamic_indexing = vk.TRUE,
+        .shader_uniform_buffer_array_non_uniform_indexing = vk.TRUE,
+        .shader_sampled_image_array_non_uniform_indexing = vk.TRUE,
+        .shader_storage_buffer_array_non_uniform_indexing = vk.TRUE,
+        .shader_storage_image_array_non_uniform_indexing = vk.TRUE,
+        .shader_input_attachment_array_non_uniform_indexing = vk.TRUE,
+        .shader_uniform_texel_buffer_array_non_uniform_indexing = vk.TRUE,
+        .shader_storage_texel_buffer_array_non_uniform_indexing = vk.TRUE,
+        .descriptor_binding_uniform_buffer_update_after_bind = vk.TRUE,
+        .descriptor_binding_sampled_image_update_after_bind = vk.TRUE,
+        .descriptor_binding_storage_image_update_after_bind = vk.TRUE,
+        .descriptor_binding_storage_buffer_update_after_bind = vk.TRUE,
+        .descriptor_binding_uniform_texel_buffer_update_after_bind = vk.TRUE,
+        .descriptor_binding_storage_texel_buffer_update_after_bind = vk.TRUE,
+        .descriptor_binding_update_unused_while_pending = vk.TRUE,
+        .descriptor_binding_partially_bound = vk.TRUE,
+        .descriptor_binding_variable_descriptor_count = vk.TRUE,
+        .runtime_descriptor_array = vk.TRUE,
     };
-
-    _ = vulkan12_features;
 
     var device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
     {
-        .p_next = &scalar_block_layout_features,
+        .p_next = &descriptor_indexing,
         .dynamic_rendering = vk.TRUE, 
         .synchronization_2 = vk.TRUE,
     };
 
     const device_features = vk.PhysicalDeviceFeatures2
     {
+        .p_next = &device_vulkan13_features,
         .features = .{
             .multi_draw_indirect = vk.TRUE,
+            .shader_sampled_image_array_dynamic_indexing = vk.TRUE,
         },
-        .p_next = &device_vulkan13_features,
     };
 
     std.log.info("Required device extensions: {s}", .{ device_extentions });
