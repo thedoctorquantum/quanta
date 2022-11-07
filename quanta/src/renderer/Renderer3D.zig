@@ -1,6 +1,7 @@
 const Renderer3D = @This();
 
 const std = @import("std");
+const window = @import("../windowing/window.zig");
 const graphics = @import("../graphics.zig");
 const GraphicsContext = graphics.Context;
 const Image = graphics.Image;
@@ -49,6 +50,8 @@ materials_buffer: graphics.Buffer,
 albedo_images: std.ArrayListUnmanaged(Image),
 albedo_samplers: std.ArrayListUnmanaged(Sampler),
 
+camera: Camera,
+
 pub fn init(
     allocator: std.mem.Allocator,
     swapchain: *graphics.Swapchain
@@ -60,7 +63,7 @@ pub fn init(
     self.vertex_offset = 0;
     self.index_offset = 0;
 
-    self.depth_image = try Image.init(640, 480, 1, vk.Format.d32_sfloat, vk.ImageLayout.attachment_optimal);
+    self.depth_image = try Image.init(window.getWidth(), window.getHeight(), 1, vk.Format.d32_sfloat, vk.ImageLayout.attachment_optimal);
     errdefer self.depth_image.deinit();
 
     self.command_buffers = try allocator.alloc(graphics.CommandBuffer, swapchain.swap_images.len);
@@ -236,9 +239,17 @@ pub fn deinit() void
     };
 }
 
-pub fn beginRender() void 
+pub const Camera = struct 
+{
+    translation: [3]f32,
+    target: [3]f32,
+    fov: f32,
+};
+
+pub fn beginRender(camera: Camera) void 
 {
     self.draw_index = 0;
+    self.camera = camera;
 }
 
 pub fn endRender() !void
@@ -323,8 +334,8 @@ pub fn endRender() !void
             {
                 .x = 0,
                 .y = 0,
-                .width = @intToFloat(f32, 640),
-                .height = @intToFloat(f32, 480),
+                .width = @intToFloat(f32, window.getWidth()),
+                .height = @intToFloat(f32, window.getHeight()),
                 .min_depth = 0,
                 .max_depth = 1,
             };
@@ -332,7 +343,7 @@ pub fn endRender() !void
             const scissor = vk.Rect2D
             {
                 .offset = .{ .x = 0, .y = 0 },
-                .extent = .{ .width = 640, .height = 480 },
+                .extent = .{ .width = window.getWidth(), .height = window.getHeight() },
             };
 
             const color_attachment = vk.RenderingAttachmentInfo
@@ -372,7 +383,7 @@ pub fn endRender() !void
                 .flags = .{},
                 .render_area = .{ 
                     .offset = .{ .x = 0, .y = 0 }, 
-                    .extent = .{ .width = 640, .height = 480 } 
+                    .extent = .{ .width = window.getWidth(), .height = window.getHeight() } 
                 },
                 .layer_count = 1,
                 .view_mask = 0,
@@ -386,8 +397,18 @@ pub fn endRender() !void
             GraphicsContext.self.vkd.cmdSetViewport(command_buffer.handle, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
             GraphicsContext.self.vkd.cmdSetScissor(command_buffer.handle, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
 
-            const projection = zalgebra.perspective(60, 640 / 480, 0.01, 1000);
-            const view_projection = projection.mul(zalgebra.lookAt(.{ .data = .{ 0, 0, 5 } }, zalgebra.Vec3.add(.{ .data = .{ 0, 0, 0 } }, .{ .data = .{ 0, 0, 0 } }), .{ .data = .{ 0, 1, 0 } }));
+            const aspect_ratio: f32 = @intToFloat(f32, window.getWidth()) / @intToFloat(f32, window.getHeight());  
+            const near_plane: f32 = 0.01;
+            const far_plane: f32 = 1000;
+            const fov: f32 = self.camera.fov;
+            const projection = zalgebra.perspective(fov, aspect_ratio, near_plane, far_plane);
+            const view_projection = projection.mul(
+                zalgebra.lookAt(
+                    .{ .data = self.camera.translation }, 
+                    .{ .data = self.camera.target }, 
+                    .{ .data = .{ 0, 1, 0 } }
+                )
+            );
 
             command_buffer.setGraphicsPipeline(self.color_pipeline);
             command_buffer.setIndexBuffer(self.index_buffer, .u32);

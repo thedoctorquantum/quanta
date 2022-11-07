@@ -56,7 +56,7 @@ pub fn main() !void
 
     const allocator = if (builtin.mode == .Debug) gpa.allocator() else std.heap.c_allocator;
 
-    try window.init(640, 480, "Quanta Example");
+    try window.init(1600, 900, "Quanta Example");
     defer window.deinit();
 
     const pipeline_cache_file_path = "pipeline_cache";
@@ -90,7 +90,7 @@ pub fn main() !void
         file.writeAll(pipeline_cache_data) catch unreachable;
     }
 
-    var swapchain = try Swapchain.init(allocator, .{ .width = 640, .height = 480 });
+    var swapchain = try Swapchain.init(allocator, .{ .width = window.getWidth(), .height = window.getHeight() });
     defer swapchain.deinit();
 
     try Renderer3D.init(allocator, &swapchain);
@@ -190,10 +190,33 @@ pub fn main() !void
         const time = std.time.milliTimestamp() - time_start;
 
         {
-            Renderer3D.beginRender();
+            const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
+
+            const camera = Renderer3D.Camera
+            {
+                .translation = .{ 0, -3, 3.5 },
+                .target = .{ 0, 0, 0 },
+                .fov = 60,
+            };
+
+            Renderer3D.beginRender(camera);
             defer Renderer3D.endRender() catch unreachable;
 
-            const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
+            var i: isize = 0;
+
+            while (i < 50) : (i += 1)
+            {
+                var j: isize = 0;
+
+                while (j < 50) : (j += 1)
+                {
+                        Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else second_mesh, if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
+                        .{  
+                            .data = .{ 5 + @intToFloat(f32, -1 * i), 0.5, @intToFloat(f32, -1 * j) }
+                        }
+                    ));
+                }
+            }
 
             Renderer3D.drawMesh(triangle_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
                 .{  
