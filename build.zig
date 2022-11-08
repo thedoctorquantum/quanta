@@ -47,6 +47,8 @@ pub fn build(builder: *std.build.Builder) !void
         exe.setBuildMode(mode);
         exe.install();
 
+        exe.addCSourceFile("quanta/src/asset/importers/cgltf.c", &[_][]const u8 {});
+
         {
             var package = std.build.Pkg 
             {

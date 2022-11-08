@@ -406,7 +406,7 @@ pub fn endRender() !void
                 zalgebra.lookAt(
                     .{ .data = self.camera.translation }, 
                     .{ .data = self.camera.target }, 
-                    .{ .data = .{ 0, 1, 0 } }
+                    .{ .data = .{ 0, -1, 0 } }
                 )
             );
 

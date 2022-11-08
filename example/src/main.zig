@@ -11,7 +11,8 @@ const Buffer = quanta.graphics.Buffer;
 const Image = quanta.graphics.Image;
 const Sampler = quanta.graphics.Sampler;
 const png = quanta.asset.importers.png;
-const vk = quanta.graphics.vulkan;
+const gltf = quanta.asset.importers.gltf;
+const zalgebra = quanta.math.zalgebra;
 
 const graphics = quanta.graphics;
 const Renderer3D = quanta.renderer.Renderer3D;
@@ -102,6 +103,10 @@ pub fn main() !void
     const wood_floor_import = try png.import(allocator, @embedFile("assets/wood_floor.png"));
     defer allocator.free(wood_floor_import.data);
 
+    const test_scene_import = try gltf.import(allocator, "example/src/assets/test_scene.gltf");
+    defer allocator.free(test_scene_import.vertices);
+    defer allocator.free(test_scene_import.indices);
+
     const triangle_mesh = try Renderer3D.createMesh(
         &[_]Renderer3D.Vertex
         {
@@ -152,6 +157,11 @@ pub fn main() !void
         &[_]u32 { 0, 1, 2 },
     );
 
+    const test_scene_mesh = try Renderer3D.createMesh(
+        test_scene_import.vertices, 
+        test_scene_import.indices
+    );
+
     const material2 = try Renderer3D.createMaterial(
         wood_floor_import.data, 
         wood_floor_import.width, 
@@ -170,7 +180,25 @@ pub fn main() !void
 
     const target_frame_time: i64 = 16; 
 
-    var delta_time: i64 = 0;
+    var delta_time: i64 = target_frame_time;
+
+    var camera = Renderer3D.Camera
+    {
+        .translation = .{ 0, 3, 12.5 },
+        .target = .{ 0, 0, 0 },
+        .fov = 60,
+    };
+
+    var camera_position = @Vector(3, f32) { 6, 3, 6 };
+    var camera_front = @Vector(3, f32) { 0, -1, -1 };
+    var camera_up = @Vector(3, f32) { 0, 1, 0 };
+    var yaw: f32 = 0;
+    var pitch: f32 = 0;
+
+    var last_mouse_x: f32 = 0;
+    var last_mouse_y: f32 = 0;
+    var camera_enable = false;
+    var camera_enable_changed = false;
 
     while (!window.shouldClose())
     {
@@ -183,21 +211,90 @@ pub fn main() !void
             if (delta_time < target_frame_time)
             {
                 //Slow down the game loop
-                std.time.sleep(@intCast(u64, (target_frame_time - delta_time) * std.time.ns_per_ms));
+                // std.time.sleep(@intCast(u64, (target_frame_time - delta_time) * std.time.ns_per_ms));
             }
         }
 
         const time = std.time.milliTimestamp() - time_start;
 
+        if (!camera_enable_changed and window.window.getKey(.tab) == .press)
+        {
+            camera_enable = !camera_enable;
+
+            if (camera_enable)
+            {
+                try window.window.setInputMode(.cursor, .disabled);
+            }
+            else 
+            {
+                try window.window.setInputMode(.cursor, .normal);
+            }
+
+            camera_enable_changed = true;
+        }
+
+        if (window.window.getKey(.tab) == .release)
+        {
+            camera_enable_changed = false;
+        }
+
+        //update
+        {
+            const x_position = @floatCast(f32, (try window.window.getCursorPos()).xpos);
+            const y_position = @floatCast(f32, (try window.window.getCursorPos()).ypos);
+
+            const x_offset = x_position - last_mouse_x;
+            const y_offset = last_mouse_y - y_position;
+
+            last_mouse_x = x_position;
+            last_mouse_y = y_position;
+
+            if (camera_enable)
+            {
+                const sensitivity = 0.1;
+                const camera_speed = @splat(3, @as(f32, 10)) * @splat(3, @intToFloat(f32, delta_time) / 1000);
+
+                yaw += x_offset * sensitivity;
+                pitch += y_offset * sensitivity;
+
+                pitch = std.math.clamp(pitch, -89, 89);
+
+                camera_front = zalgebra.Vec3.norm(
+                    .{ 
+                        .data = .{
+                            @cos(zalgebra.toRadians(-yaw)) * @cos(zalgebra.toRadians(pitch)),
+                            @sin(zalgebra.toRadians(pitch)),
+                            @sin(zalgebra.toRadians(-yaw)) * @cos(zalgebra.toRadians(pitch)),
+                        } 
+                    }
+                ).data;
+
+                if (window.window.getKey(.w) == .press)
+                {
+                    camera_position += camera_speed * camera_front;
+                } 
+                else if (window.window.getKey(.s) == .press)
+                {
+                    camera_position -= camera_speed * camera_front;
+                }
+
+                if (window.window.getKey(.a) == .press)
+                {
+                    camera_position += zalgebra.Vec3.norm(zalgebra.Vec3.cross(.{ .data = camera_front }, .{ .data = camera_up })).mul(.{ .data = camera_speed }).data;
+                }
+                else if (window.window.getKey(.d) == .press)
+                {
+                    camera_position -= zalgebra.Vec3.norm(zalgebra.Vec3.cross(.{ .data = camera_front }, .{ .data = camera_up })).mul(.{ .data = camera_speed }).data;
+                }
+            }
+
+            camera.target = camera_position + camera_front;
+            camera.translation = camera_position;
+        }
+
+        //draw
         {
             const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
-
-            const camera = Renderer3D.Camera
-            {
-                .translation = .{ 0, -3, 3.5 },
-                .target = .{ 0, 0, 0 },
-                .fov = 60,
-            };
 
             Renderer3D.beginRender(camera);
             defer Renderer3D.endRender() catch unreachable;
@@ -221,6 +318,12 @@ pub fn main() !void
             Renderer3D.drawMesh(triangle_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
                 .{  
                     .data = .{ 0, y_offset, 0 }
+                }
+            ));
+
+            Renderer3D.drawMesh(test_scene_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
+                .{  
+                    .data = .{ 0, 2, 0 }
                 }
             ));
 

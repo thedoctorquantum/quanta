@@ -43,3 +43,8 @@ pub fn getHeight() u32
 {
     return self.height;
 }
+
+pub fn getKeyDown(key: glfw.Key) bool 
+{
+    return window.getKey(key) == .press;
+}
