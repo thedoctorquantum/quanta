@@ -3,6 +3,7 @@ const CommandBuffer = @This();
 const std = @import("std");
 const vk = @import("vk.zig");
 const Context = @import("Context.zig");
+const ComputePipeline = @import("GraphicsPipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const Buffer = @import("Buffer.zig");
 const Image = @import("Image.zig");
@@ -118,6 +119,17 @@ pub fn setGraphicsPipeline(self: *CommandBuffer, pipeline: GraphicsPipeline) voi
     );
 
     self.pipeline_layout = pipeline.layout;
+
+    Context.self.vkd.cmdBindDescriptorSets(
+        self.handle, 
+        .graphics,
+        pipeline.layout, 
+        0, 
+        @intCast(u32, pipeline.descriptor_sets.len), 
+        pipeline.descriptor_sets.ptr, 
+        0, 
+        undefined
+    );
 }
 
 pub fn setVertexBuffer(self: CommandBuffer, buffer: Buffer) void 
@@ -265,4 +277,20 @@ pub fn drawIndexedIndirectCount(
         @truncate(u32, max_draw_count),
         @sizeOf(DrawIndexedIndirectCommand),
     );
+}
+
+pub fn setComputePipeline(self: CommandBuffer, pipeline: ComputePipeline) void 
+{
+    Context.self.vkd.cmdBindPipeline(
+        self.handle, 
+        .compute, 
+        pipeline.handle
+    );
+
+    self.pipeline_layout = pipeline.layout;
+}
+
+pub fn computeDispatch(self: CommandBuffer, group_count_x: u32, group_count_y: u32, group_count_z: u32) void 
+{
+    Context.self.vkd.cmdDispatch(self.handle, group_count_x, group_count_y, group_count_z);
 }

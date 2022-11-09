@@ -22,7 +22,7 @@ layout(set = 0, binding = 3, scalar) restrict readonly buffer Materials
     Material materials[];
 };
 
-layout(set = 0, binding = 4) uniform sampler2D samplers[];
+layout(set = 0, binding = 4) uniform sampler2D samplers[16000];
 
 void main() 
 {

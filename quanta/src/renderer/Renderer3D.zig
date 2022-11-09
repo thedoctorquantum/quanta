@@ -103,6 +103,7 @@ pub fn init(
     errdefer self.index_buffer.deinit();
 
     self.color_pipeline = try graphics.GraphicsPipeline.init(
+        self.allocator,
         .{
             .color_attachment_formats = &[_]vk.Format 
             {
@@ -127,83 +128,10 @@ pub fn init(
     self.materials_buffer = try graphics.Buffer.init(command_count * @sizeOf(Material), .storage);
     errdefer self.materials_buffer.deinit();
 
-    GraphicsContext.self.vkd.updateDescriptorSets(
-        GraphicsContext.self.device, 
-        4, 
-        &[_]vk.WriteDescriptorSet
-        {
-            .{
-                .dst_set = self.color_pipeline.descriptor_sets[0],
-                .dst_binding = 0,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = &[_]vk.DescriptorBufferInfo
-                {
-                    .{
-                        .buffer = self.vertex_buffer.handle,
-                        .offset = 0,
-                        .range = self.vertex_buffer.size,
-                    }
-                },
-                .p_texel_buffer_view = undefined,
-            },
-            .{
-                .dst_set = self.color_pipeline.descriptor_sets[0],
-                .dst_binding = 1,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = &[_]vk.DescriptorBufferInfo
-                {
-                    .{
-                        .buffer = self.transforms_buffer.handle,
-                        .offset = 0,
-                        .range = self.transforms_buffer.size,
-                    }
-                },
-                .p_texel_buffer_view = undefined,
-            },
-            .{
-                .dst_set = self.color_pipeline.descriptor_sets[0],
-                .dst_binding = 2,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = &[_]vk.DescriptorBufferInfo
-                {
-                    .{
-                        .buffer = self.material_indices_buffer.handle,
-                        .offset = 0,
-                        .range = self.material_indices_buffer.size,
-                    }
-                },
-                .p_texel_buffer_view = undefined,
-            },
-            .{
-                .dst_set = self.color_pipeline.descriptor_sets[0],
-                .dst_binding = 3,
-                .dst_array_element = 0,
-                .descriptor_count = 1,
-                .descriptor_type = .storage_buffer,
-                .p_image_info = undefined,
-                .p_buffer_info = &[_]vk.DescriptorBufferInfo
-                {
-                    .{
-                        .buffer = self.materials_buffer.handle,
-                        .offset = 0,
-                        .range = self.materials_buffer.size,
-                    }
-                },
-                .p_texel_buffer_view = undefined,
-            },
-        }, 
-        0, 
-        undefined,
-    );
+    self.color_pipeline.setDescriptorBuffer(0, 0, self.vertex_buffer);
+    self.color_pipeline.setDescriptorBuffer(1, 0, self.transforms_buffer);
+    self.color_pipeline.setDescriptorBuffer(2, 0, self.material_indices_buffer);
+    self.color_pipeline.setDescriptorBuffer(3, 0, self.materials_buffer);
 }
 
 pub fn deinit() void 
@@ -416,17 +344,6 @@ pub fn endRender() !void
                 .view_projection = view_projection.data,
             });
 
-            GraphicsContext.self.vkd.cmdBindDescriptorSets(
-                command_buffer.handle, 
-                .graphics,
-                command_buffer.pipeline_layout, 
-                0, 
-                1, 
-                self.color_pipeline.descriptor_sets.ptr, 
-                0, 
-                undefined
-            );
-
             command_buffer.drawIndexedIndirect(
                 self.draw_indirect_buffer, 
                 0, 
@@ -623,32 +540,7 @@ pub fn createMaterial(
 
     std.log.debug("Created material {}", .{ material_handle });
 
-    GraphicsContext.self.vkd.updateDescriptorSets(
-        GraphicsContext.self.device, 
-        1, 
-        &[_]vk.WriteDescriptorSet
-        {
-            .{
-                .dst_set = self.color_pipeline.descriptor_sets[0],
-                .dst_binding = 4,
-                .dst_array_element = material_handle,
-                .descriptor_count = 1,
-                .descriptor_type = .combined_image_sampler,
-                .p_image_info = &[_]vk.DescriptorImageInfo 
-                {
-                    .{
-                        .sampler = albedo_sampler.handle,
-                        .image_view = albedo_image.view,
-                        .image_layout = albedo_image.layout,
-                    }
-                },
-                .p_buffer_info = undefined,
-                .p_texel_buffer_view = undefined,
-            },
-        }, 
-        0, 
-        undefined,
-    );
+    self.color_pipeline.setDescriptorImageSampler(4, material_handle, albedo_image, albedo_sampler);
 
     try self.materials.append(self.allocator, .{
         .albedo_texture_index = material_handle,

@@ -2,7 +2,11 @@ const GraphicsPipeline = @This();
 
 const std = @import("std");
 const vk = @import("vk.zig");
+const spirv = @import("spirv.zig");
 const Context = @import("Context.zig");
+const Image = @import("Image.zig");
+const Sampler = @import("Sampler.zig");
+const Buffer = @import("Buffer.zig");
 
 handle: vk.Pipeline,
 layout: vk.PipelineLayout,
@@ -107,10 +111,170 @@ fn getVertexLayout(comptime T: type) [if (T == void) 0 else std.meta.fieldNames(
     return attributes;
 }
 
+fn getDescriptorType(spirv_op: spirv.SpvOp) vk.DescriptorType
+{
+    return switch (spirv_op)
+    {
+        spirv.SpvOpTypeStruct => .storage_buffer,
+        spirv.SpvOpTypeImage => .storage_image,
+        spirv.SpvOpTypeSampler => .sampler,
+        spirv.SpvOpTypeSampledImage => .combined_image_sampler,
+        else => unreachable,
+    };
+}
+
+const ShaderParseResult = struct 
+{
+    resource_types: [32]vk.DescriptorType,
+    resource_array_lengths: [32]u32,
+    resource_count: u32,
+    resource_mask: u32,
+};
+
+fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocator, shader_module_code: []const u32) !void
+{
+    std.debug.assert(shader_module_code[0] == spirv.SpvMagicNumber);
+
+    const id_count = shader_module_code[3];
+
+    std.log.info("spirv id_count = {}", .{ id_count });
+
+    const Id = struct 
+    {
+        opcode: u32,
+        type_id: u32,
+        storage_class: u32,
+        binding: u32,
+        set: u32,
+        constant: u32,
+        array_length: u32,
+    };
+
+    var ids = try allocator.alloc(Id, id_count);
+    defer allocator.free(ids);
+
+    for (ids) |*id|
+    {
+        id.array_length = 1;
+    }
+
+    var word_index: usize = 5;
+
+    while (word_index < shader_module_code.len)
+    {
+        const word = shader_module_code[word_index];
+
+        const instruction_opcode = @truncate(u16, word);
+        const instruction_word_count = @truncate(u16, word >> 16);
+
+        const words = shader_module_code[word_index..word_index + instruction_word_count];
+
+        switch (instruction_opcode)
+        {
+            spirv.SpvOpEntryPoint => {
+                std.log.info("Found shader entry point", .{});
+            },
+            spirv.SpvOpExecutionMode => {},
+            spirv.SpvOpExecutionModeId => {},
+            spirv.SpvOpDecorate => {
+                const id = words[1];
+
+                std.debug.assert(id < id_count);
+
+                switch (words[2])
+                {
+                    spirv.SpvDecorationDescriptorSet => {
+                        std.log.info("Found descriptor set '{}'", .{ words[3] });
+
+                        ids[id].set = words[3];
+                    },
+                    spirv.SpvDecorationBinding => {
+                        std.log.info("Found descriptor set binding '{}'", .{ words[3] });
+
+                        ids[id].binding = words[3];
+                    },
+                    else => {},
+                }
+            },
+            spirv.SpvOpTypeStruct,
+            spirv.SpvOpTypeImage,
+            spirv.SpvOpTypeSampler,
+            spirv.SpvOpTypeSampledImage,
+            spirv.SpvOpTypeArray,
+            spirv.SpvOpTypeRuntimeArray,
+            => {
+                std.log.info("Found shader descriptor", .{});
+
+                const id = words[1];
+
+                ids[id].opcode = instruction_opcode;
+
+                switch (instruction_opcode)
+                {
+                    spirv.SpvOpTypeArray => {
+                        ids[id].opcode = ids[words[2]].opcode;
+                        ids[id].array_length = ids[words[3]].constant;
+                    },
+                    else => {},
+                }
+            },
+            spirv.SpvOpTypePointer => {
+                const id = words[1];
+
+                ids[id].opcode = instruction_opcode;
+                ids[id].type_id = words[3];
+                ids[id].storage_class = words[2];
+            },
+            spirv.SpvOpConstant => {
+                const id = words[2];
+
+                ids[id].opcode = instruction_opcode;
+                ids[id].type_id = words[1];
+                ids[id].constant = words[3];
+
+                std.log.info("spirv const = {}", .{ ids[id].constant });
+            },
+            spirv.SpvOpVariable => {
+                const id = words[2];
+
+                ids[id].opcode = instruction_opcode;
+                ids[id].type_id = words[1];
+                ids[id].storage_class = words[3];
+            },
+            else => {},
+        }
+
+        word_index += instruction_word_count;
+    }
+
+    for (ids) |id|
+    {
+        if (id.opcode == spirv.SpvOpVariable and 
+            (
+                id.storage_class == spirv.SpvStorageClassUniform or 
+                id.storage_class == spirv.SpvStorageClassUniformConstant or 
+                id.storage_class == spirv.SpvStorageClassStorageBuffer 
+            )
+        )
+        {
+            const type_kind = ids[ids[id.type_id].type_id].opcode;
+            const array_length = ids[ids[id.type_id].type_id].array_length;
+            const resource_type = getDescriptorType(type_kind);
+
+            result.resource_array_lengths[id.binding] = array_length;
+
+            result.resource_types[id.binding] = resource_type;
+            result.resource_mask |= @as(u32, 1) << @intCast(u5, id.binding);
+            result.resource_count += 1;
+        }
+    }
+}
+
 ///Provides a compile time known type for fixed function vertex layouts
 ///Could use the upcoming zig feature inline function parameters with runtime type info
 ///May also need to user spir-v reflection for more refined automatic vertex layout description 
 pub fn init(
+    allocator: std.mem.Allocator,
     options: Options,
     comptime VertexType: ?type,
     comptime PushDataType: ?type,
@@ -118,6 +282,22 @@ pub fn init(
     ) !GraphicsPipeline
 {
     _ = resource_sets;
+
+
+    var shader_parse_result: ShaderParseResult = .{
+        .resource_types = [_]vk.DescriptorType { @intToEnum(vk.DescriptorType, @as(i32, std.math.maxInt(i32))) } ** 32,
+        .resource_array_lengths = [_]u32 { 1 } ** 32,
+        .resource_count = 0,
+        .resource_mask = 0,
+    };
+
+    try parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.vertex_shader_binary.ptr)[0..options.vertex_shader_binary.len / 4]);
+    try parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.fragment_shader_binary.ptr)[0..options.fragment_shader_binary.len / 4]);
+
+    for (shader_parse_result.resource_types[0..shader_parse_result.resource_count]) |resource_type, i|
+    {
+        std.log.info("resources[{}] = {}, count = {}", .{ i, resource_type, shader_parse_result.resource_array_lengths[i] });
+    }
 
     const vertex_binding_descriptions = [_]vk.VertexInputBindingDescription 
     {
@@ -135,100 +315,55 @@ pub fn init(
         std.log.debug("Vertex format for {s}: {any}", .{ @typeName(VertexType.?), vertex_attribute_descriptions });
     }
 
-    const descriptor_set_layout_bindings = [_]vk.DescriptorSetLayoutBinding
-    {
-        .{
-            .binding = 0,
-            .descriptor_type = .storage_buffer,
-            .descriptor_count = 1,
-            .stage_flags = .{ .vertex_bit = true, },
-            .p_immutable_samplers = null,
-        },
-        .{
-            .binding = 1,
-            .descriptor_type = .storage_buffer,
-            .descriptor_count = 1,
-            .stage_flags = .{ .vertex_bit = true, },
-            .p_immutable_samplers = null,
-        },
-        .{
-            .binding = 2,
-            .descriptor_type = .storage_buffer,
-            .descriptor_count = 1,
-            .stage_flags = .{ .vertex_bit = true, },
-            .p_immutable_samplers = null,
-        },
-        .{
-            .binding = 3,
-            .descriptor_type = .storage_buffer,
-            .descriptor_count = 1,
-            .stage_flags = .{ .fragment_bit = true, },
-            .p_immutable_samplers = null,
-        },
-        .{
-            .binding = 4,
-            .descriptor_type = .combined_image_sampler,
-            .descriptor_count = 16000,
-            .stage_flags = .{ .fragment_bit = true, },
-            .p_immutable_samplers = null,
-        },
-    };
+    const descriptor_set_layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, shader_parse_result.resource_count);
+    defer allocator.free(descriptor_set_layout_bindings);
 
-    const descriptor_set_layout_binding_flags = [_]vk.DescriptorBindingFlags
+    for (descriptor_set_layout_bindings) |*descriptor_binding, i|
     {
-        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
-        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
-        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
-        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
-        .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, },
-    };
+        descriptor_binding.binding = @intCast(u32, i);
+        descriptor_binding.descriptor_count = shader_parse_result.resource_array_lengths[i];
+        descriptor_binding.descriptor_type = shader_parse_result.resource_types[i];
+        descriptor_binding.stage_flags = .{ .vertex_bit = true, .fragment_bit = true, };
+        descriptor_binding.p_immutable_samplers = null;
+    }
 
-    const descriptor_pool_sizes = [_]vk.DescriptorPoolSize
+    const descriptor_set_layout_binding_flags = try allocator.alloc(vk.DescriptorBindingFlags, shader_parse_result.resource_count);
+    defer allocator.free(descriptor_set_layout_binding_flags);
+
+    for (descriptor_set_layout_binding_flags) |*binding_flags|
     {
-        .{
-            .@"type" = .storage_buffer,
-            .descriptor_count = 1,
-        },
-        .{
-            .@"type" = .storage_buffer,
-            .descriptor_count = 1,
-        },
-        .{
-            .@"type" = .storage_buffer,
-            .descriptor_count = 1,
-        },
-        .{
-            .@"type" = .storage_buffer,
-            .descriptor_count = 1,
-        },
-                .{
-            .@"type" = .storage_buffer,
-            .descriptor_count = 1,
-        },
-        .{
-            .@"type" = .combined_image_sampler,
-            .descriptor_count = 16000,
-        }
-    };
+        binding_flags.* = .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, };
+    }
+
+    const descriptor_pool_sizes = try allocator.alloc(vk.DescriptorPoolSize, shader_parse_result.resource_count);
+    defer allocator.free(descriptor_pool_sizes);
+
+    for (descriptor_pool_sizes) |*descriptor_pool_size, i|
+    {
+        descriptor_pool_size.* = .{
+            .@"type" = shader_parse_result.resource_types[i],
+            .descriptor_count = shader_parse_result.resource_array_lengths[i],
+        };
+    }
 
     const descriptor_set_layout_infos = [1]vk.DescriptorSetLayoutCreateInfo
     {
         .{
             .p_next = &vk.DescriptorSetLayoutBindingFlagsCreateInfo
             {
-                .binding_count = descriptor_set_layout_binding_flags.len,
-                .p_binding_flags = &descriptor_set_layout_binding_flags,
+                .binding_count = @intCast(u32, descriptor_set_layout_binding_flags.len),
+                .p_binding_flags = descriptor_set_layout_binding_flags.ptr,
             },
             .flags = .{ .update_after_bind_pool_bit = true, },
-            .binding_count = descriptor_set_layout_bindings.len,
-            .p_bindings = &descriptor_set_layout_bindings,
+            .binding_count = @intCast(u32, descriptor_set_layout_bindings.len),
+            .p_bindings = descriptor_set_layout_bindings.ptr,
         }
     };
 
     const Static = struct 
     {
-        var descriptor_set_layouts: [descriptor_set_layout_infos.len]vk.DescriptorSetLayout = undefined;
-        var descriptor_sets: [descriptor_set_layout_infos.len]vk.DescriptorSet = undefined;
+        var descriptor_set_layouts: [1]vk.DescriptorSetLayout = undefined;
+        var descriptor_sets: [1]vk.DescriptorSet = undefined;
     };
 
     var self = GraphicsPipeline
@@ -245,8 +380,8 @@ pub fn init(
     self.descriptor_pool = try Context.self.vkd.createDescriptorPool(Context.self.device, &.{
         .flags = .{ .update_after_bind_bit = true,  },
         .max_sets = 1,
-        .pool_size_count = 1,
-        .p_pool_sizes = &descriptor_pool_sizes,
+        .pool_size_count = @intCast(u32, descriptor_pool_sizes.len),
+        .p_pool_sizes = descriptor_pool_sizes.ptr,
     }, &Context.self.allocation_callbacks);
     errdefer Context.self.vkd.destroyDescriptorPool(Context.self.device, self.descriptor_pool, &Context.self.allocation_callbacks);
 
@@ -487,5 +622,86 @@ pub fn deinit(self: *GraphicsPipeline) void
         Context.self.device, 
         self.handle, 
         &Context.self.allocation_callbacks
+    );
+}
+
+pub fn setDescriptorImageSampler(
+    self: *GraphicsPipeline,
+    index: u32,
+    array_index: u32,
+    image: Image,
+    sampler: Sampler,
+) void 
+{
+    Context.self.vkd.updateDescriptorSets(
+        Context.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = self.descriptor_sets[0],
+                .dst_binding = index,
+                .dst_array_element = array_index,
+                .descriptor_count = 1,
+                .descriptor_type = .combined_image_sampler,
+                .p_image_info = &[_]vk.DescriptorImageInfo 
+                {
+                    .{
+                        .sampler = sampler.handle,
+                        .image_view = image.view,
+                        .image_layout = image.layout,
+                    }
+                },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        }, 
+        0, 
+        undefined,
+    );
+}
+
+pub fn setDescriptorBuffer(
+    self: *GraphicsPipeline,
+    index: u32,
+    array_index: u32,
+    buffer: Buffer,
+) void
+{
+    const descriptor_type: vk.DescriptorType = switch (buffer.usage)
+    {
+        .vertex => .storage_buffer,
+        .index => .storage_buffer,
+        .uniform => .uniform_buffer,
+        .storage => .storage_buffer,
+        .indirect_draw => .storage_buffer,
+        .staging => unreachable,
+    };
+
+    Context.self.vkd.updateDescriptorSets(
+        Context.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = self.descriptor_sets[0],
+                .dst_binding = index,
+                .dst_array_element = array_index,
+                .descriptor_count = 1,
+                .descriptor_type = descriptor_type,
+                .p_image_info = undefined,
+                .p_buffer_info = &[_]vk.DescriptorBufferInfo 
+                {
+                    .{
+                        .buffer = buffer.handle,
+                        .offset = 0,
+                        .range = buffer.size,
+                    }
+                },
+                .p_texel_buffer_view = undefined,
+            },
+        }, 
+        0, 
+        undefined,
     );
 }
