@@ -29,6 +29,11 @@ fn compileShader(builder: *std.build.Builder, mode: std.builtin.Mode, comptime s
             "-Werror", 
             "-c", 
             shader_optimisation, 
+        }
+        ++
+        &[_][]const u8 
+        {
+            "-g",
             "-o", 
             shader_binary_directory ++ output
         }

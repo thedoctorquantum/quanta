@@ -15,24 +15,17 @@ struct Vertex
     vec2 uv;
 };
 
-layout(set = 0, binding = 0, scalar) readonly buffer Vertices
+layout(set = 0, binding = 0, scalar) restrict readonly buffer Vertices
 {
     Vertex vertices[];
 };
 
-struct Transform
+layout(set = 0, binding = 1, scalar) restrict readonly buffer Transforms
 {
-    vec3 translation;
-    vec3 scale;
-    vec4 rotation;
+    mat4x3 transforms[];
 };
 
-layout(set = 0, binding = 1, scalar) readonly buffer Transforms
-{
-    mat4 transforms[];
-};
-
-layout(set = 0, binding = 2, scalar) readonly buffer MaterialIndicies
+layout(set = 0, binding = 2, scalar) restrict readonly buffer MaterialIndicies
 {
     uint material_indices[];
 };
@@ -47,11 +40,11 @@ layout(location = 0) out Out
 void main() 
 {
     Vertex vertex = vertices[gl_VertexIndex]; 
-    mat4 transform = transforms[gl_DrawIDARB];
+    mat4 transform = mat4(transforms[gl_InstanceIndex]);
 
     out_data.color = unpackUnorm4x8(vertex.color);
     out_data.uv = vertex.uv;
-    out_data.material_index = material_indices[gl_DrawIDARB]; 
+    out_data.material_index = material_indices[gl_InstanceIndex]; 
 
     gl_Position = constants.view_projection * transform * vec4(vertex.position, 1.0);
 }

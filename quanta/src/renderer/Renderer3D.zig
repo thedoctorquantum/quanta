@@ -38,7 +38,7 @@ draw_index: u32,
 
 meshes: std.ArrayListUnmanaged(Mesh),
 
-transforms: std.ArrayListUnmanaged([4][4]f32),
+transforms: std.ArrayListUnmanaged([4][3]f32),
 transforms_buffer: graphics.Buffer,
 
 material_indices: std.ArrayListUnmanaged(u32),
@@ -118,7 +118,7 @@ pub fn init(
     );
     errdefer self.color_pipeline.deinit();
 
-    self.transforms_buffer = try graphics.Buffer.init(command_count * @sizeOf([4][4]f32), .storage);
+    self.transforms_buffer = try graphics.Buffer.init(command_count * @sizeOf([4][3]f32), .storage);
     errdefer self.transforms_buffer.deinit();
 
     self.material_indices_buffer = try graphics.Buffer.init(command_count * @sizeOf(u32), .storage);
@@ -258,7 +258,7 @@ pub fn endRender() !void
     const image = self.swapchain.swap_images[image_index];
     const command_buffer = &self.command_buffers[image_index];
 
-    try self.transforms_buffer.update([4][4]f32, 0, self.transforms.items);
+    try self.transforms_buffer.update([4][3]f32, 0, self.transforms.items);
     try self.material_indices_buffer.update(u32, 0, self.material_indices.items);
     try self.materials_buffer.update(Material, 0, self.materials.items);
 
@@ -678,13 +678,19 @@ pub fn drawMesh(
         .first_index = mesh_data.index_offset / @sizeOf(u32),
         .index_count = mesh_data.index_count,
         .vertex_offset = @intCast(i32, mesh_data.vertex_offset / @sizeOf(Vertex)),
-        .first_instance = 0, 
+        .first_instance = self.draw_index, 
         .instance_count = 1,
     };
 
     self.transforms.append(
         self.allocator,
-        transform.data
+        [4][3]f32
+        {
+            transform.data[0][0..3].*,
+            transform.data[1][0..3].*,
+            transform.data[2][0..3].*,
+            transform.data[3][0..3].*,
+        }
     ) catch unreachable;
 
     self.material_indices.append(

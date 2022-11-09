@@ -166,10 +166,6 @@ pub fn copyBuffer(self: CommandBuffer, source: Buffer, source_offset: usize, des
 
 pub fn copyBufferToImage(self: CommandBuffer, source: Buffer, destination: Image) void
 {
-    std.log.debug("width = {}", .{ destination.width });
-    std.log.debug("height = {}", .{ destination.height });
-    std.log.debug("depth = {}", .{ destination.depth });
-
     Context.self.vkd.cmdCopyBufferToImage2(self.handle, &.{
         .src_buffer = source.handle,
         .dst_image = destination.handle,

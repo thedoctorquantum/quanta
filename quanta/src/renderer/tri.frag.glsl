@@ -17,7 +17,7 @@ struct Material
     uint albedo_color;
 };
 
-layout(set = 0, binding = 3, scalar) readonly buffer Materials
+layout(set = 0, binding = 3, scalar) restrict readonly buffer Materials
 {
     Material materials[];
 };
