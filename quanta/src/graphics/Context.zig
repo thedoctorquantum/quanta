@@ -7,7 +7,7 @@ const glfw = @import("glfw");
 
 pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
-pub const enable_mangohud = builtin.mode == .Debug or true;
+pub const enable_mangohud = builtin.mode == .Debug and false;
 pub const vulkan_version = std.builtin.Version { .major = 1, .minor = 3, .patch = 0, };
 
 pub const BaseDispatch = vk.BaseWrapper(.{
@@ -28,6 +28,7 @@ pub const InstanceDispatch = vk.InstanceWrapper(.{
     .getPhysicalDeviceQueueFamilyProperties = true,
     .getPhysicalDeviceSurfaceSupportKHR = true,
     .getPhysicalDeviceMemoryProperties = true,
+    .getPhysicalDeviceFeatures2 = true,
     .getDeviceProcAddr = true,
     .getPhysicalDeviceFeatures = true,
     .createDebugUtilsMessengerEXT = enable_debug_messenger,
@@ -114,6 +115,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .destroySampler = true,
     .cmdPushDescriptorSetKHR = true,
     .cmdDrawIndexedIndirect = true,
+    .cmdDrawIndexedIndirectCount = true,
 });
 
 var vkGetInstanceProcAddr: vk.PfnGetInstanceProcAddr = undefined;
@@ -353,6 +355,18 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
     }
 
     self.instance = try self.vkb.createInstance(&.{
+        .p_next = if (enable_khronos_validation)
+            &vk.ValidationFeaturesEXT {
+                .enabled_validation_feature_count = 2,
+                .p_enabled_validation_features = &[_]vk.ValidationFeatureEnableEXT
+                {
+                    .best_practices_ext,
+                    .synchronization_validation_ext
+                },
+                .disabled_validation_feature_count = 0,
+                .p_disabled_validation_features = undefined,
+            }
+        else null,
         .flags = .{},
         .p_application_info = &vk.ApplicationInfo 
         {
@@ -407,20 +421,21 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         vk.extension_info.khr_push_descriptor.name,
     };
 
-    var scalar_block_layout_features = vk.PhysicalDeviceScalarBlockLayoutFeatures
+    var device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
     {
+        .p_next = null,
+        .dynamic_rendering = vk.TRUE, 
+        .synchronization_2 = vk.TRUE,
+        .maintenance_4 = vk.TRUE,
+        .subgroup_size_control = vk.TRUE,
+        .compute_full_subgroups = vk.TRUE,
+    };
+
+    var device_vulkan12_features = vk.PhysicalDeviceVulkan12Features
+    {
+        .p_next = &device_vulkan13_features,
+        .draw_indirect_count = vk.TRUE,
         .scalar_block_layout = vk.TRUE,
-    };
-
-    var draw_parameters = vk.PhysicalDeviceShaderDrawParametersFeatures
-    {
-        .p_next = &scalar_block_layout_features,
-        .shader_draw_parameters = vk.TRUE,
-    };
-
-    var descriptor_indexing = vk.PhysicalDeviceDescriptorIndexingFeatures
-    {
-        .p_next = &draw_parameters,
         .shader_input_attachment_array_dynamic_indexing = vk.TRUE,
         .shader_uniform_texel_buffer_array_dynamic_indexing = vk.TRUE,
         .shader_storage_texel_buffer_array_dynamic_indexing = vk.TRUE,
@@ -443,20 +458,10 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         .runtime_descriptor_array = vk.TRUE,
     };
 
-    var device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
+    var device_vulkan11_features = vk.PhysicalDeviceVulkan11Features
     {
-        .p_next = &descriptor_indexing,
-        .dynamic_rendering = vk.TRUE, 
-        .synchronization_2 = vk.TRUE,
-    };
-
-    const device_features = vk.PhysicalDeviceFeatures2
-    {
-        .p_next = &device_vulkan13_features,
-        .features = .{
-            .multi_draw_indirect = vk.TRUE,
-            .shader_sampled_image_array_dynamic_indexing = vk.TRUE,
-        },
+        .p_next = &device_vulkan12_features,
+        .shader_draw_parameters = vk.TRUE,
     };
 
     std.log.info("Required device extensions: {s}", .{ device_extentions });
@@ -682,17 +687,26 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         std.log.info("self.compute_family_index = {?}", .{ self.compute_family_index });
         std.log.info("self.transfer_family_index = {?}", .{ self.transfer_family_index });
 
-        self.device = try self.vki.createDevice(self.physical_device, &.{
-            .p_next = &device_vulkan13_features,
+        var physical_device_features: vk.PhysicalDeviceFeatures2 = .{
+            .p_next = &device_vulkan11_features,
+            .features = .{},
+        };
+
+        self.vki.getPhysicalDeviceFeatures2(self.physical_device, &physical_device_features);
+
+        const device_create_info = vk.DeviceCreateInfo {
+            .p_next = &physical_device_features,
             .flags = .{},
             .p_queue_create_infos = &queue_create_infos,
             .queue_create_info_count = @intCast(u32, queue_create_infos.len),
-            .p_enabled_features = &device_features.features,
+            .p_enabled_features = null,
             .enabled_extension_count = device_extentions.len,
             .pp_enabled_extension_names = &device_extentions,
             .enabled_layer_count = 0,
             .pp_enabled_layer_names = undefined,
-        }, &self.allocation_callbacks);
+        };
+
+        self.device = try self.vki.createDevice(self.physical_device, &device_create_info, &self.allocation_callbacks);
 
         self.vkd = try DeviceDispatch.load(self.device, self.vki.dispatch.vkGetDeviceProcAddr);
 

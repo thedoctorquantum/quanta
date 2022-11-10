@@ -72,7 +72,7 @@ pub fn init(size: usize, usage: Usage) !Buffer
             .index => .{ .index_buffer_bit = true, .transfer_dst_bit = true },
             .uniform => .{ .uniform_buffer_bit = true, .transfer_dst_bit = true },
             .storage => .{ .storage_buffer_bit = true, .transfer_dst_bit = true },
-            .indirect_draw => .{ .indirect_buffer_bit = true, .transfer_dst_bit = true, },
+            .indirect_draw => .{ .indirect_buffer_bit = true, .storage_buffer_bit = true, .transfer_dst_bit = true, },
             .staging => .{ .transfer_src_bit = true },
         },
         .sharing_mode = .exclusive,

@@ -7,9 +7,18 @@ const quanta = @import("quanta/src/main.zig");
 
 fn compileShader(builder: *std.build.Builder, mode: std.builtin.Mode, comptime stage: []const u8, comptime source: []const u8, comptime output: []const u8) !void 
 {
-    const shader_target = "vulkan1.3";
-    const shader_source_directory = "quanta/src/renderer/";
-    const shader_binary_directory = "quanta/src/renderer/spirv/";
+    return switch (mode)
+    {
+        .Debug => compileShaderSpecialized(builder, .Debug, stage, source, output),
+        .ReleaseFast => compileShaderSpecialized(builder, .ReleaseFast, stage, source, output),
+        .ReleaseSafe => compileShaderSpecialized(builder, .ReleaseSafe, stage, source, output),
+        .ReleaseSmall => compileShaderSpecialized(builder, .ReleaseSmall, stage, source, output),
+    };
+}
+
+fn compileShaderSpecialized(builder: *std.build.Builder, comptime mode: std.builtin.Mode, comptime stage: []const u8, comptime source: []const u8, comptime output: []const u8) !void 
+{
+    const shader_target = "vulkan1.2";
 
     const shader_optimisation = switch (mode)
     {
@@ -19,25 +28,34 @@ fn compileShader(builder: *std.build.Builder, mode: std.builtin.Mode, comptime s
         .Debug => "-O0",
     };
 
-    try builder.spawnChild(
-        &[_][]const u8 
-        { 
-            "glslc", 
-            "--target-env=" ++ shader_target, 
-            "-fshader-stage=" ++ stage, 
-            shader_source_directory ++ source, 
-            "-Werror", 
-            "-c", 
-            shader_optimisation, 
-        }
-        ++
-        &[_][]const u8 
+    comptime var args: []const []const u8 = &.{};
+
+    args = args ++ &[_][]const u8 
+    { 
+        "glslc", 
+        "--target-env=" ++ shader_target, 
+        "-fshader-stage=" ++ stage, 
+        source, 
+        "-Werror", 
+        "-c", 
+        shader_optimisation, 
+    };
+
+    if (mode == .Debug)
+    {
+        args = args ++ &[_][]const u8 
         {
-            "-g",
-            "-o", 
-            shader_binary_directory ++ output
-        }
-    );
+            "-g"
+        };
+    }
+
+    args = args ++ &[_][]const u8 
+    {
+        "-o", 
+        output
+    };
+
+    try builder.spawnChild(args);
 }
 
 pub fn build(builder: *std.build.Builder) !void 
@@ -95,8 +113,9 @@ pub fn build(builder: *std.build.Builder) !void
             exe.strip = true;
         }
 
-        try compileShader(builder, mode, "vert", "tri.vert.glsl", "tri.vert.spv");
-        try compileShader(builder, mode, "frag", "tri.frag.glsl", "tri.frag.spv");
+        try compileShader(builder, mode, "vert", "quanta/src/renderer/tri.vert.glsl", "quanta/src/renderer/spirv/tri.vert.spv");
+        try compileShader(builder, mode, "frag", "quanta/src/renderer/tri.frag.glsl", "quanta/src/renderer/spirv/tri.frag.spv");
+        try compileShader(builder, mode, "comp", "quanta/src/renderer/cull.comp.glsl", "quanta/src/renderer/spirv/cull.comp.spv");
 
         const run_cmd = exe.run();
         run_cmd.step.dependOn(builder.getInstallStep());

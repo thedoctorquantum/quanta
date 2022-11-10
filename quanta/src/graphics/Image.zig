@@ -59,13 +59,13 @@ pub fn initData(
                 .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
                 {
                     .src_stage_mask = .{
-                        .top_of_pipe_bit = true,
-                    },
-                    .dst_stage_mask = .{
                         .copy_bit = true,
                     },
-                    .src_access_mask = .{},
-                    .dst_access_mask = .{ .transfer_write_bit = true, },
+                    .src_access_mask = .{
+                        .transfer_write_bit = true,
+                    },
+                    .dst_stage_mask = .{},
+                    .dst_access_mask = .{},
                     .old_layout = .transfer_dst_optimal,
                     .new_layout = image.layout,
                     .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,

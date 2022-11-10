@@ -299,6 +299,12 @@ pub fn main() !void
             Renderer3D.beginRender(camera);
             defer Renderer3D.endRender() catch unreachable;
 
+            Renderer3D.drawMesh(test_scene_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
+                .{  
+                    .data = .{ 0, 2, 0 }
+                }
+            ));
+
             var i: isize = 0;
 
             while (i < 50) : (i += 1)
@@ -318,12 +324,6 @@ pub fn main() !void
             Renderer3D.drawMesh(triangle_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
                 .{  
                     .data = .{ 0, y_offset, 0 }
-                }
-            ));
-
-            Renderer3D.drawMesh(test_scene_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
-                .{  
-                    .data = .{ 0, 2, 0 }
                 }
             ));
 

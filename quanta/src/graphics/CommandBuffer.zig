@@ -3,7 +3,7 @@ const CommandBuffer = @This();
 const std = @import("std");
 const vk = @import("vk.zig");
 const Context = @import("Context.zig");
-const ComputePipeline = @import("GraphicsPipeline.zig");
+const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const Buffer = @import("Buffer.zig");
 const Image = @import("Image.zig");
@@ -18,6 +18,9 @@ handle: vk.CommandBuffer,
 queue: Queue,
 pipeline_layout: vk.PipelineLayout,
 wait_fence: vk.Fence, 
+local_size_x: u32,
+local_size_y: u32,
+local_size_z: u32,
 
 pub fn init(queue: Queue) !CommandBuffer
 {
@@ -26,6 +29,9 @@ pub fn init(queue: Queue) !CommandBuffer
         .queue = queue,
         .pipeline_layout = .null_handle,
         .wait_fence = .null_handle,
+        .local_size_x = 0,
+        .local_size_y = 0,
+        .local_size_z = 0,
     };
 
     const pool = switch (self.queue)
@@ -299,7 +305,7 @@ pub fn drawIndexedIndirectCount(
     );
 }
 
-pub fn setComputePipeline(self: CommandBuffer, pipeline: ComputePipeline) void 
+pub fn setComputePipeline(self: *CommandBuffer, pipeline: ComputePipeline) void 
 {
     Context.self.vkd.cmdBindPipeline(
         self.handle, 
@@ -308,9 +314,27 @@ pub fn setComputePipeline(self: CommandBuffer, pipeline: ComputePipeline) void
     );
 
     self.pipeline_layout = pipeline.layout;
+    self.local_size_x = pipeline.local_size_x;
+    self.local_size_y = pipeline.local_size_y;
+    self.local_size_z = pipeline.local_size_z;
+
+    Context.self.vkd.cmdBindDescriptorSets(
+        self.handle, 
+        .compute,
+        pipeline.layout, 
+        0, 
+        @intCast(u32, pipeline.descriptor_sets.len), 
+        pipeline.descriptor_sets.ptr, 
+        0, 
+        undefined
+    );
 }
 
-pub fn computeDispatch(self: CommandBuffer, group_count_x: u32, group_count_y: u32, group_count_z: u32) void 
+pub fn computeDispatch(self: CommandBuffer, thread_count_x: u32, thread_count_y: u32, thread_count_z: u32) void 
 {
+    const group_count_x = (thread_count_x + self.local_size_x - 1) / self.local_size_x; 
+    const group_count_y = (thread_count_y + self.local_size_y - 1) / self.local_size_y; 
+    const group_count_z = (thread_count_z + self.local_size_z - 1) / self.local_size_z; 
+
     Context.self.vkd.cmdDispatch(self.handle, group_count_x, group_count_y, group_count_z);
 }

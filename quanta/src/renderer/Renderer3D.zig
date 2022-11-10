@@ -9,6 +9,8 @@ const Sampler = graphics.Sampler;
 const vk = graphics.vulkan;
 const zalgebra = @import("zalgebra");
 
+const cull_comp_spv = @alignCast(4, @embedFile("spirv/cull.comp.spv"));
+
 const tri_vert_spv = @alignCast(4, @embedFile("spirv/tri.vert.spv"));
 const tri_frag_spv = @alignCast(4, @embedFile("spirv/tri.frag.spv"));
 
@@ -30,9 +32,11 @@ vertex_offset: usize,
 index_buffer: graphics.Buffer,
 index_offset: usize,
 
+cull_pipeline: graphics.ComputePipeline,
 color_pipeline: graphics.GraphicsPipeline,
 
 draw_indirect_buffer: graphics.Buffer,
+draw_indirect_count_buffer: graphics.Buffer,
 draws: []graphics.CommandBuffer.DrawIndexedIndirectCommand, 
 draw_index: u32,
 
@@ -94,6 +98,9 @@ pub fn init(
 
     self.draws = try self.draw_indirect_buffer.map(graphics.CommandBuffer.DrawIndexedIndirectCommand);
 
+    self.draw_indirect_count_buffer = try graphics.Buffer.init(@sizeOf(u32), .indirect_draw);
+    errdefer self.draw_indirect_count_buffer.deinit();
+
     const vertex_buffer_size = 128 * 1024 * 1024;
 
     self.vertex_buffer = try graphics.Buffer.init(vertex_buffer_size, .storage);
@@ -101,6 +108,15 @@ pub fn init(
 
     self.index_buffer = try graphics.Buffer.init(vertex_buffer_size, .index);
     errdefer self.index_buffer.deinit();
+
+    self.cull_pipeline = try graphics.ComputePipeline.init(
+        self.allocator, 
+        cull_comp_spv, 
+        .@"1d",
+        null,
+        null
+    );
+    errdefer self.cull_pipeline.deinit(self.allocator);
 
     self.color_pipeline = try graphics.GraphicsPipeline.init(
         self.allocator,
@@ -131,6 +147,9 @@ pub fn init(
     self.color_pipeline.setDescriptorBuffer(1, 0, self.transforms_buffer);
     self.color_pipeline.setDescriptorBuffer(2, 0, self.material_indices_buffer);
     self.color_pipeline.setDescriptorBuffer(3, 0, self.materials_buffer);
+
+    self.cull_pipeline.setDescriptorBuffer(4, 0, self.draw_indirect_buffer);
+    self.cull_pipeline.setDescriptorBuffer(5, 0, self.draw_indirect_count_buffer);
 }
 
 pub fn deinit() void 
@@ -144,8 +163,10 @@ pub fn deinit() void
     };
     defer self.frame_fence.deinit();
     defer self.draw_indirect_buffer.deinit();
+    defer self.draw_indirect_count_buffer.deinit();
     defer self.vertex_buffer.deinit();
     defer self.index_buffer.deinit();
+    defer self.cull_pipeline.deinit(self.allocator);
     defer self.color_pipeline.deinit();
     defer self.meshes.deinit(self.allocator);
     defer self.transforms_buffer.deinit();
@@ -188,6 +209,7 @@ pub fn endRender() !void
     try self.transforms_buffer.update([4][3]f32, 0, self.transforms.items);
     try self.material_indices_buffer.update(u32, 0, self.material_indices.items);
     try self.materials_buffer.update(Material, 0, self.materials.items);
+    try self.draw_indirect_count_buffer.update(u32, 0, &.{ 0 });
 
     {
         command_buffer.begin() catch unreachable;
@@ -257,6 +279,35 @@ pub fn endRender() !void
 
         //Color pass #1
         {
+            command_buffer.setComputePipeline(self.cull_pipeline);
+            command_buffer.computeDispatch(self.draw_index, 1, 1);
+
+            GraphicsContext.self.vkd.cmdPipelineBarrier2(
+                command_buffer.handle, 
+                &.{
+                    .dependency_flags = .{ .by_region_bit = true, },
+                    .memory_barrier_count = 0,
+                    .p_memory_barriers = undefined,
+                    .buffer_memory_barrier_count = 1,
+                    .p_buffer_memory_barriers = &[_]vk.BufferMemoryBarrier2
+                    {
+                        .{
+                            .src_stage_mask = .{ .compute_shader_bit = true },
+                            .src_access_mask = .{ .shader_write_bit = true },
+                            .dst_stage_mask = .{ .draw_indirect_bit = true },
+                            .dst_access_mask = .{ .indirect_command_read_bit = true },
+                            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                            .buffer = self.draw_indirect_buffer.handle,
+                            .offset = 0,
+                            .size = self.draw_indirect_buffer.size,
+                        }
+                    },
+                    .image_memory_barrier_count = 0,
+                    .p_image_memory_barriers = undefined,
+                }
+            );
+
             const color_attachment = vk.RenderingAttachmentInfo
             {
                 .image_view = image.view,
@@ -327,9 +378,11 @@ pub fn endRender() !void
                 .view_projection = view_projection.data,
             });
 
-            command_buffer.drawIndexedIndirect(
+            command_buffer.drawIndexedIndirectCount(
                 self.draw_indirect_buffer, 
                 0, 
+                self.draw_indirect_count_buffer,
+                0,
                 self.draw_index
             );
         }
@@ -554,7 +607,7 @@ pub fn drawMesh(
         .index_count = mesh_data.index_count,
         .vertex_offset = @intCast(i32, mesh_data.vertex_offset / @sizeOf(Vertex)),
         .first_instance = self.draw_index, 
-        .instance_count = 1,
+        .instance_count = 0,
     };
 
     self.transforms.append(
