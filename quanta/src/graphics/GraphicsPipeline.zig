@@ -119,25 +119,10 @@ pub fn init(
     comptime PushDataType: ?type,
     ) !GraphicsPipeline
 {
-    var shader_parse_result: spirv_parse.ShaderParseResult = .{
-        .resource_types = [_]vk.DescriptorType { @intToEnum(vk.DescriptorType, @as(i32, std.math.maxInt(i32))) } ** 32,
-        .resource_array_lengths = [_]u32 { 1 } ** 32,
-        .resource_count = 0,
-        .resource_mask = 0,
-        .local_size_x = 0,
-        .local_size_y = 0,
-        .local_size_z = 0,
-    };
+    var shader_parse_result: spirv_parse.ShaderParseResult = std.mem.zeroes(spirv_parse.ShaderParseResult);
 
     try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.vertex_shader_binary.ptr)[0..options.vertex_shader_binary.len / 4]);
     try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.fragment_shader_binary.ptr)[0..options.fragment_shader_binary.len / 4]);
-
-    for (shader_parse_result.resource_types[0..shader_parse_result.resource_count]) |resource_type, i|
-    {
-        std.log.info("resources[{}] = {}, count = {}", .{ i, resource_type, shader_parse_result.resource_array_lengths[i] });
-    }
-
-    std.log.info("local_size_x = {}, local_size_y = {}, local_size_z = {}", .{ shader_parse_result.local_size_x, shader_parse_result.local_size_y, shader_parse_result.local_size_z });
 
     const vertex_binding_descriptions = [_]vk.VertexInputBindingDescription 
     {
@@ -155,9 +140,9 @@ pub fn init(
 
     for (descriptor_set_layout_bindings) |*descriptor_binding, i|
     {
-        descriptor_binding.binding = @intCast(u32, i);
-        descriptor_binding.descriptor_count = shader_parse_result.resource_array_lengths[i];
-        descriptor_binding.descriptor_type = shader_parse_result.resource_types[i];
+        descriptor_binding.binding = shader_parse_result.resources[i].binding;
+        descriptor_binding.descriptor_count = shader_parse_result.resources[i].descriptor_count;
+        descriptor_binding.descriptor_type = shader_parse_result.resources[i].descriptor_type;
         descriptor_binding.stage_flags = .{ .vertex_bit = true, .fragment_bit = true, };
         descriptor_binding.p_immutable_samplers = null;
     }
@@ -176,8 +161,8 @@ pub fn init(
     for (descriptor_pool_sizes) |*descriptor_pool_size, i|
     {
         descriptor_pool_size.* = .{
-            .@"type" = shader_parse_result.resource_types[i],
-            .descriptor_count = shader_parse_result.resource_array_lengths[i],
+            .@"type" = shader_parse_result.resources[i].descriptor_type,
+            .descriptor_count = shader_parse_result.resources[i].descriptor_count,
         };
     }
 

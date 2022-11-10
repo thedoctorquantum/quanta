@@ -8,15 +8,15 @@
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
-layout(set = 0, binding = 0, scalar) restrict readonly buffer Transforms
-{
-    mat4x3 transforms[];
-};
+// layout(set = 0, binding = 0, scalar) restrict readonly buffer Transforms
+// {
+//     mat4x3 transforms[];
+// };
 
-layout(set = 0, binding = 1, scalar) restrict readonly buffer MeshIndices
-{
-    u32 mesh_indices[];
-};
+// layout(set = 0, binding = 1, scalar) restrict readonly buffer MeshIndices
+// {
+//     u32 mesh_indices[];
+// };
 
 struct Mesh 
 {
@@ -32,15 +32,15 @@ struct MeshLod
     u32 index_count;
 };
 
-layout(set = 0, binding = 2, scalar) restrict readonly buffer Meshes
-{
-    Mesh meshes[];
-};
+// layout(set = 0, binding = 2, scalar) restrict readonly buffer Meshes
+// {
+//     Mesh meshes[];
+// };
 
-layout(set = 0, binding = 3, scalar) restrict readonly buffer MeshLods
-{
-    MeshLod mesh_lods[];
-};
+// layout(set = 0, binding = 3, scalar) restrict readonly buffer MeshLods
+// {
+//     MeshLod mesh_lods[];
+// };
 
 struct DrawIndexedIndirectCommand
 {

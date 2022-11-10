@@ -16,13 +16,19 @@ fn getDescriptorType(spirv_op: spirv.SpvOp) vk.DescriptorType
 
 pub const ShaderParseResult = struct 
 {
-    resource_types: [32]vk.DescriptorType,
-    resource_array_lengths: [32]u32,
-    resource_count: u32,
-    resource_mask: u32,
-    local_size_x: u32,
-    local_size_y: u32,
-    local_size_z: u32,
+    resources: [32]Resource = std.mem.zeroes([32]Resource),
+    resource_count: u32 = 0,
+    resource_mask: u32 = 0,
+    local_size_x: u32 = 0,
+    local_size_y: u32 = 0,
+    local_size_z: u32 = 0,
+
+    const Resource = struct 
+    {
+        descriptor_type: vk.DescriptorType,
+        descriptor_count: u32, 
+        binding: u32,
+    };
 };
 
 pub fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocator, shader_module_code: []const u32) !void
@@ -57,8 +63,6 @@ pub fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocato
     var local_size_z_id: ?u32 = null;
 
     var word_index: usize = 5;
-
-    var instruction_index: usize = 0;
 
     while (word_index < shader_module_code.len)
     {
@@ -142,12 +146,11 @@ pub fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocato
                 ids[id].storage_class = words[3];
             },
             else => {
-                
+
             },
         }
 
         word_index += instruction_word_count;
-        instruction_index += 1;
     }
 
     for (ids) |id|
@@ -164,9 +167,12 @@ pub fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocato
             const array_length = ids[ids[id.type_id].type_id].array_length;
             const resource_type = getDescriptorType(type_kind);
 
-            result.resource_array_lengths[id.binding] = array_length;
+            result.resources[result.resource_count] = .{
+                .descriptor_type = resource_type,
+                .descriptor_count = array_length,
+                .binding = id.binding,
+            };
 
-            result.resource_types[id.binding] = resource_type;
             result.resource_mask |= @as(u32, 1) << @intCast(u5, id.binding);
             result.resource_count += 1;
         }

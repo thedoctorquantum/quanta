@@ -147,7 +147,7 @@ fn debugUtilsMessengerCallback(
     }
     else
     {
-        std.log.warn("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        std.log.debug("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
     }
 
     return vk.FALSE;
