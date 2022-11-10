@@ -33,6 +33,7 @@ layout(set = 0, binding = 2, scalar) restrict readonly buffer MaterialIndicies
 layout(location = 0) out Out
 {
     flat uint material_index;
+    flat uint instance_index;
     vec4 color;
     vec2 uv;
 } out_data;
@@ -45,6 +46,7 @@ void main()
     out_data.color = unpackUnorm4x8(vertex.color);
     out_data.uv = vertex.uv;
     out_data.material_index = material_indices[gl_InstanceIndex]; 
+    out_data.instance_index = gl_InstanceIndex;
 
     gl_Position = constants.view_projection * transform * vec4(vertex.position, 1.0);
 }

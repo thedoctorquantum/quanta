@@ -357,10 +357,13 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
     self.instance = try self.vkb.createInstance(&.{
         .p_next = if (enable_khronos_validation)
             &vk.ValidationFeaturesEXT {
-                .enabled_validation_feature_count = 2,
+                .enabled_validation_feature_count = 1,
                 .p_enabled_validation_features = &[_]vk.ValidationFeatureEnableEXT
                 {
-                    .best_practices_ext,
+                    //I am getting really wierd segfaults at draw time using best practices layer
+                    //It seems to happen whenever the shader changes between runs, which implies something to do with pipeline_cache
+                    //TODO: Look into this, it's very wierd and needs time to be examined
+                    // .best_practices_ext,
                     .synchronization_validation_ext
                 },
                 .disabled_validation_feature_count = 0,
@@ -423,7 +426,6 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
     var device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
     {
-        .p_next = null,
         .dynamic_rendering = vk.TRUE, 
         .synchronization_2 = vk.TRUE,
         .maintenance_4 = vk.TRUE,

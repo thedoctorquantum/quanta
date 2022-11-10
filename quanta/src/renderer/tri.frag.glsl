@@ -5,6 +5,7 @@
 layout(location = 0) in Out
 {
     flat uint material_index;
+    flat uint instance_index;
     vec4 color;
     vec2 uv;
 } in_data;
