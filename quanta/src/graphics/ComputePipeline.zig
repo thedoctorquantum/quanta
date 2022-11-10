@@ -16,6 +16,11 @@ pub fn init(
     comptime PushDataType: ?type,
 ) !ComputePipeline
 {
+    _ = shader_code;
+    _ = size_x;
+    _ = size_y;
+    _ = size_z;
+
     var self = ComputePipeline
     {
         .handle = .null_handle,

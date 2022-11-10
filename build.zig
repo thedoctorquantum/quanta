@@ -33,7 +33,7 @@ fn compileShader(builder: *std.build.Builder, mode: std.builtin.Mode, comptime s
         ++
         &[_][]const u8 
         {
-            // "-g",
+            "-g",
             "-o", 
             shader_binary_directory ++ output
         }

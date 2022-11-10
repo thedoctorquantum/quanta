@@ -149,6 +149,26 @@ pub fn setPushData(self: CommandBuffer, comptime T: type, data: T) void
     );
 }
 
+pub fn setViewport(self: CommandBuffer, x: f32, y: f32, width: f32, height: f32, min_depth: f32, max_depth: f32) void 
+{
+    Context.self.vkd.cmdSetViewport(self.handle, 0, 1, @ptrCast([*]const vk.Viewport, &.{
+        .x = x,
+        .y = y,
+        .width = width,
+        .height = height,
+        .min_depth = min_depth,
+        .max_depth = max_depth,
+    }));
+}
+
+pub fn setScissor(self: CommandBuffer, x: u32, y: u32, width: u32, height: u32) void 
+{
+    Context.self.vkd.cmdSetScissor(self.handle, 0, 1, @ptrCast([*]const vk.Rect2D, &.{
+        .offset = .{ .x = x, .y = y },
+        .extent = .{ .width = width, .height = height }
+    }));
+}
+
 pub const IndexType = enum 
 {
     u16,

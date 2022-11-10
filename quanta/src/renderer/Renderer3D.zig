@@ -115,7 +115,6 @@ pub fn init(
         },
         null,
         ColorPassPushConstants,
-        null,
     );
     errdefer self.color_pipeline.deinit();
 
@@ -258,22 +257,6 @@ pub fn endRender() !void
 
         //Color pass #1
         {
-            const viewport = vk.Viewport
-            {
-                .x = 0,
-                .y = 0,
-                .width = @intToFloat(f32, window.getWidth()),
-                .height = @intToFloat(f32, window.getHeight()),
-                .min_depth = 0,
-                .max_depth = 1,
-            };
-
-            const scissor = vk.Rect2D
-            {
-                .offset = .{ .x = 0, .y = 0 },
-                .extent = .{ .width = window.getWidth(), .height = window.getHeight() },
-            };
-
             const color_attachment = vk.RenderingAttachmentInfo
             {
                 .image_view = image.view,
@@ -322,8 +305,8 @@ pub fn endRender() !void
             });
             defer GraphicsContext.self.vkd.cmdEndRendering(command_buffer.handle);
 
-            GraphicsContext.self.vkd.cmdSetViewport(command_buffer.handle, 0, 1, @ptrCast([*]const vk.Viewport, &viewport));
-            GraphicsContext.self.vkd.cmdSetScissor(command_buffer.handle, 0, 1, @ptrCast([*]const vk.Rect2D, &scissor));
+            command_buffer.setViewport(0, 0, @intToFloat(f32, window.getWidth()), @intToFloat(f32, window.getHeight()), 0, 1);
+            command_buffer.setScissor(0, 0, window.getWidth(), window.getHeight());
 
             const aspect_ratio: f32 = @intToFloat(f32, window.getWidth()) / @intToFloat(f32, window.getHeight());  
             const near_plane: f32 = 0.01;

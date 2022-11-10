@@ -23,7 +23,6 @@ pub const Options = struct
     stencil_attachment_format: ?vk.Format = null,
     vertex_shader_binary: []align(4) const u8,
     fragment_shader_binary: []align(4) const u8,
-    vertex_attribute_descriptions: []const vk.VertexInputAttributeDescription = &.{},
 };
 
 fn getAttributeFormat(comptime T: type) vk.Format 
@@ -272,18 +271,13 @@ fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocator, s
 
 ///Provides a compile time known type for fixed function vertex layouts
 ///Could use the upcoming zig feature inline function parameters with runtime type info
-///May also need to user spir-v reflection for more refined automatic vertex layout description 
 pub fn init(
     allocator: std.mem.Allocator,
     options: Options,
     comptime VertexType: ?type,
     comptime PushDataType: ?type,
-    comptime resource_sets: anytype, 
     ) !GraphicsPipeline
 {
-    _ = resource_sets;
-
-
     var shader_parse_result: ShaderParseResult = .{
         .resource_types = [_]vk.DescriptorType { @intToEnum(vk.DescriptorType, @as(i32, std.math.maxInt(i32))) } ** 32,
         .resource_array_lengths = [_]u32 { 1 } ** 32,
@@ -309,11 +303,6 @@ pub fn init(
     };
 
     const vertex_attribute_descriptions = getVertexLayout(VertexType orelse void);
-
-    if (VertexType != null)
-    {
-        std.log.debug("Vertex format for {s}: {any}", .{ @typeName(VertexType.?), vertex_attribute_descriptions });
-    }
 
     const descriptor_set_layout_bindings = try allocator.alloc(vk.DescriptorSetLayoutBinding, shader_parse_result.resource_count);
     defer allocator.free(descriptor_set_layout_bindings);
