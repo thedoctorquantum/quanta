@@ -5,7 +5,6 @@
 layout(location = 0) in Out
 {
     flat uint material_index;
-    flat uint instance_index;
     vec4 color;
     vec2 uv;
 } in_data;
@@ -18,12 +17,12 @@ struct Material
     uint albedo_color;
 };
 
-layout(set = 0, binding = 3, scalar) restrict readonly buffer Materials
+layout(set = 0, binding = 4, scalar) restrict readonly buffer Materials
 {
     Material materials[];
 };
 
-layout(set = 0, binding = 4) uniform sampler2D samplers[16000];
+layout(set = 0, binding = 5) uniform sampler2D samplers[16000];
 
 void main() 
 {

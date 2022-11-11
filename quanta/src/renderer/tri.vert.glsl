@@ -2,6 +2,8 @@
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_ARB_shader_draw_parameters : enable
 
+#define u32 uint
+
 layout(push_constant) uniform Constants
 {
     mat4 view_projection;
@@ -30,23 +32,38 @@ layout(set = 0, binding = 2, scalar) restrict readonly buffer MaterialIndicies
     uint material_indices[];
 };
 
+struct DrawIndexedIndirectCommand
+{
+    u32 index_count;
+    u32 instance_count;
+    u32 first_index;
+    u32 vertex_offset;
+    u32 first_instance; 
+    u32 instance_index;
+};
+
+layout(set = 0, binding = 3, scalar) restrict readonly buffer DrawCommands
+{
+    DrawIndexedIndirectCommand draw_commands[];
+};
+
 layout(location = 0) out Out
 {
     flat uint material_index;
-    flat uint instance_index;
     vec4 color;
     vec2 uv;
 } out_data;
 
 void main() 
 {
+    uint instance_index = draw_commands[gl_DrawIDARB].instance_index;
+    
     Vertex vertex = vertices[gl_VertexIndex]; 
-    mat4 transform = mat4(transforms[gl_InstanceIndex]);
+    mat4 transform = mat4(transforms[instance_index]);
 
     out_data.color = unpackUnorm4x8(vertex.color);
     out_data.uv = vertex.uv;
-    out_data.material_index = material_indices[gl_InstanceIndex]; 
-    out_data.instance_index = gl_InstanceIndex;
+    out_data.material_index = material_indices[instance_index]; 
 
     gl_Position = constants.view_projection * transform * vec4(vertex.position, 1.0);
 }

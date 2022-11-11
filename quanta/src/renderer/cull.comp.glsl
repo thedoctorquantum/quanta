@@ -13,31 +13,26 @@ layout(set = 0, binding = 0, scalar) restrict readonly buffer Transforms
     mat4x3 transforms[];
 };
 
-layout(set = 0, binding = 1, scalar) restrict readonly buffer MeshIndices
-{
-    u32 mesh_indices[];
-};
-
 struct Mesh 
 {
+    u32 vertex_offset;
+    u32 vertex_start;
     u32 lod_begin;
     u32 lod_count;
 };
 
 struct MeshLod 
 {
-    u32 vertex_offset;
-    u32 vertex_start;
     u32 index_offset;
     u32 index_count;
 };
 
-layout(set = 0, binding = 2, scalar) restrict readonly buffer Meshes
+layout(set = 0, binding = 1, scalar) restrict readonly buffer Meshes
 {
     Mesh meshes[];
 };
 
-layout(set = 0, binding = 3, scalar) restrict readonly buffer MeshLods
+layout(set = 0, binding = 2, scalar) restrict readonly buffer MeshLods
 {
     MeshLod mesh_lods[];
 };
@@ -47,35 +42,58 @@ struct DrawIndexedIndirectCommand
     u32 index_count;
     u32 instance_count;
     u32 first_index;
-    i32 vertex_offset;
+    u32 vertex_offset;
     u32 first_instance; 
+    u32 instance_index;
 };
 
-layout(set = 0, binding = 4, scalar) restrict writeonly buffer DrawCommands
+layout(set = 0, binding = 3, scalar) restrict writeonly buffer DrawCommands
 {
     DrawIndexedIndirectCommand draw_commands[];
 };
 
-layout(set = 0, binding = 5) buffer DrawCommandCount
+layout(set = 0, binding = 4) buffer DrawCommandCount
 {
 	u32 draw_command_count;
 };
 
+struct InputDraw 
+{
+    u32 mesh_index;
+};
+
+layout(set = 0, binding = 5, scalar) restrict readonly buffer InputDraws
+{
+    InputDraw input_draws[];
+};
+
+layout(push_constant) uniform PushConstants
+{
+    u32 draw_count;
+};
+
 void main() 
 {
-    u32 di = gl_GlobalInvocationID.x;
+    u32 read_draw_index = gl_GlobalInvocationID.x;
 
-	if (di >= draw_commands.length())
+	if (read_draw_index >= draw_count)
 		return;
 
-    if (di < 2600)
-    {
-        u32 index = atomicAdd(draw_command_count, 1);
+    InputDraw draw = input_draws[read_draw_index];
+    Mesh mesh = meshes[draw.mesh_index];
+    MeshLod mesh_lod = mesh_lods[mesh.lod_begin];
 
-        draw_commands[index].instance_count = 1;
-    }
-    else 
+    bool visible = true;
+
+    if (visible)
     {
-        draw_commands[di].instance_count = 0;
+        u32 write_draw_index = atomicAdd(draw_command_count, 1);
+
+        draw_commands[write_draw_index].first_index = mesh_lod.index_offset / 4;
+        draw_commands[write_draw_index].index_count = mesh_lod.index_count;
+        draw_commands[write_draw_index].vertex_offset = mesh.vertex_offset / 36;
+        draw_commands[write_draw_index].first_instance = 0;
+        draw_commands[write_draw_index].instance_count = 1;
+        draw_commands[write_draw_index].instance_index = read_draw_index;
     }
 }

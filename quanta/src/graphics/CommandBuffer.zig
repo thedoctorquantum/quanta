@@ -21,6 +21,7 @@ wait_fence: vk.Fence,
 local_size_x: u32,
 local_size_y: u32,
 local_size_z: u32,
+is_graphics_pipeline: bool,
 
 pub fn init(queue: Queue) !CommandBuffer
 {
@@ -32,6 +33,7 @@ pub fn init(queue: Queue) !CommandBuffer
         .local_size_x = 0,
         .local_size_y = 0,
         .local_size_z = 0,
+        .is_graphics_pipeline = false,
     };
 
     const pool = switch (self.queue)
@@ -136,6 +138,8 @@ pub fn setGraphicsPipeline(self: *CommandBuffer, pipeline: GraphicsPipeline) voi
         0, 
         undefined
     );
+
+    self.is_graphics_pipeline = true;
 }
 
 pub fn setVertexBuffer(self: CommandBuffer, buffer: Buffer) void 
@@ -145,10 +149,12 @@ pub fn setVertexBuffer(self: CommandBuffer, buffer: Buffer) void
 
 pub fn setPushData(self: CommandBuffer, comptime T: type, data: T) void 
 {
+    const shader_stages: vk.ShaderStageFlags = if (self.is_graphics_pipeline) .{ .vertex_bit = true, .fragment_bit = true } else .{ .compute_bit = true };
+
     Context.self.vkd.cmdPushConstants(
         self.handle, 
         self.pipeline_layout, 
-        .{ .vertex_bit = true, .fragment_bit = true }, 
+        shader_stages, 
         0, 
         @sizeOf(T), 
         &data
@@ -201,6 +207,23 @@ pub fn copyBuffer(self: CommandBuffer, source: Buffer, source_offset: usize, des
 
     Context.self.vkd.cmdCopyBuffer(self.handle, source.handle, destination.handle, 1, @ptrCast([*]const vk.BufferCopy, &copy_region));
 }
+
+pub fn updateBuffer(self: CommandBuffer, destination: Buffer, offset: usize, comptime T: type, data: []const T) void 
+{
+    std.debug.assert((data.len * @sizeOf(T)) <= 65536);
+
+    Context.self.vkd.cmdUpdateBuffer(self.handle, destination.handle, offset, data.len * @sizeOf(T), data.ptr);
+}
+
+pub fn fillBuffer(self: CommandBuffer, source: Buffer, offset: usize, size: usize, value: u32) void 
+{
+    Context.self.vkd.cmdFillBuffer(self.handle, source.handle, offset, size, value);
+}
+
+// pub fn bufferBarrier(self: CommandBuffer, source: Buffer) void 
+// {
+
+// }
 
 pub fn copyBufferToImage(self: CommandBuffer, source: Buffer, destination: Image) void
 {
@@ -289,6 +312,7 @@ pub fn drawIndexedIndirectCount(
     self: CommandBuffer,
     draw_buffer: Buffer,
     draw_buffer_offset: usize,
+    draw_buffer_stride: usize,
     count_buffer: Buffer,
     count_buffer_offset: usize,
     max_draw_count: usize,
@@ -301,7 +325,7 @@ pub fn drawIndexedIndirectCount(
         count_buffer.handle, 
         count_buffer_offset, 
         @truncate(u32, max_draw_count),
-        @sizeOf(DrawIndexedIndirectCommand),
+        @intCast(u32, draw_buffer_stride),
     );
 }
 
@@ -328,6 +352,8 @@ pub fn setComputePipeline(self: *CommandBuffer, pipeline: ComputePipeline) void
         0, 
         undefined
     );
+
+    self.is_graphics_pipeline = false;
 }
 
 pub fn computeDispatch(self: CommandBuffer, thread_count_x: u32, thread_count_y: u32, thread_count_z: u32) void 

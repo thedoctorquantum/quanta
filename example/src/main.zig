@@ -307,15 +307,17 @@ pub fn main() !void
 
             var i: isize = 0;
 
-            while (i < 50) : (i += 1)
+            const mesh_square_size = 50;
+
+            while (i < mesh_square_size) : (i += 1)
             {
                 var j: isize = 0;
 
-                while (j < 50) : (j += 1)
+                while (j < mesh_square_size) : (j += 1)
                 {
-                        Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else second_mesh, if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
+                        Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else test_scene_mesh, if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
                         .{  
-                            .data = .{ 5 + @intToFloat(f32, -1 * i), 0.5, @intToFloat(f32, -1 * j) }
+                            .data = .{ 5 + @intToFloat(f32, -1 * i * 10), 0.5 + y_offset + @intToFloat(f32, (i + j * mesh_square_size)) / 100, @intToFloat(f32, -1 * j * 10) }
                         }
                     ));
                 }

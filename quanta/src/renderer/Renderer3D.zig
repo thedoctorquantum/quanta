@@ -19,6 +19,22 @@ const ColorPassPushConstants = extern struct
     view_projection: [4][4]f32,
 };
 
+const DrawCullPushConstants = extern struct 
+{
+    draw_count: u32,
+};
+
+const InputDraw = extern struct 
+{
+    mesh_index: u32,
+};
+
+const DrawCommand = extern struct 
+{
+    indirect_command: graphics.CommandBuffer.DrawIndexedIndirectCommand,
+    instance_index: u32,
+};
+
 pub var self: Renderer3D = undefined;
 
 allocator: std.mem.Allocator,
@@ -37,24 +53,33 @@ color_pipeline: graphics.GraphicsPipeline,
 
 draw_indirect_buffer: graphics.Buffer,
 draw_indirect_count_buffer: graphics.Buffer,
-draws: []graphics.CommandBuffer.DrawIndexedIndirectCommand, 
 draw_index: u32,
 
 meshes: std.ArrayListUnmanaged(Mesh),
+mesh_buffer: graphics.Buffer,
 
-transforms: std.ArrayListUnmanaged([4][3]f32),
+mesh_lods: std.ArrayListUnmanaged(MeshLod),
+mesh_lod_buffer: graphics.Buffer,
+
+transforms: [][4][3]f32,
 transforms_buffer: graphics.Buffer,
 
-material_indices: std.ArrayListUnmanaged(u32),
+material_indices: []u32,
 material_indices_buffer: graphics.Buffer,
 
 materials: std.ArrayListUnmanaged(Material),
 materials_buffer: graphics.Buffer,
 
+input_draws: []InputDraw,
+input_draw_buffer: graphics.Buffer,
+
 albedo_images: std.ArrayListUnmanaged(Image),
 albedo_samplers: std.ArrayListUnmanaged(Sampler),
 
 camera: Camera,
+
+mesh_data_changed: bool,
+material_data_changed: bool,
 
 pub fn init(
     allocator: std.mem.Allocator,
@@ -66,6 +91,8 @@ pub fn init(
     self.draw_index = 0;
     self.vertex_offset = 0;
     self.index_offset = 0;
+    self.mesh_data_changed = false;
+    self.material_data_changed = false;
 
     self.depth_image = try Image.init(window.getWidth(), window.getHeight(), 1, vk.Format.d32_sfloat, vk.ImageLayout.attachment_optimal);
     errdefer self.depth_image.deinit();
@@ -73,7 +100,6 @@ pub fn init(
     self.command_buffers = try allocator.alloc(graphics.CommandBuffer, swapchain.swap_images.len);
     errdefer allocator.free(self.command_buffers);
 
-    self.transforms = .{};
     self.materials = .{};
     self.albedo_images = .{};
     self.albedo_samplers = .{};
@@ -91,19 +117,28 @@ pub fn init(
     self.frame_fence = try graphics.Fence.init();
     errdefer self.frame_fence.deinit();
 
-    const command_count = 4096;
+    const command_count = 4096 * 16;
 
-    self.draw_indirect_buffer = try graphics.Buffer.init(command_count * @sizeOf(graphics.CommandBuffer.DrawIndexedIndirectCommand), .indirect_draw);
+    self.draw_indirect_buffer = try graphics.Buffer.init(command_count * @sizeOf(DrawCommand), .indirect_draw);
     errdefer self.draw_indirect_buffer.deinit();
-
-    self.draws = try self.draw_indirect_buffer.map(graphics.CommandBuffer.DrawIndexedIndirectCommand);
 
     self.draw_indirect_count_buffer = try graphics.Buffer.init(@sizeOf(u32), .indirect_draw);
     errdefer self.draw_indirect_count_buffer.deinit();
 
+    self.input_draw_buffer = try graphics.Buffer.init(command_count * @sizeOf(InputDraw), .storage);
+    errdefer self.input_draw_buffer.deinit();
+
+    self.input_draws = try self.input_draw_buffer.map(InputDraw);
+
+    self.mesh_buffer = try graphics.Buffer.init(4096, .storage);
+    errdefer self.mesh_buffer.deinit();
+
+    self.mesh_lod_buffer = try graphics.Buffer.init(4096 * 4, .storage);
+    errdefer self.mesh_lod_buffer.deinit();
+
     const vertex_buffer_size = 128 * 1024 * 1024;
 
-    self.vertex_buffer = try graphics.Buffer.init(vertex_buffer_size, .storage);
+    self.vertex_buffer = try graphics.Buffer.init(vertex_buffer_size, .vertex);
     errdefer self.vertex_buffer.deinit();
 
     self.index_buffer = try graphics.Buffer.init(vertex_buffer_size, .index);
@@ -114,7 +149,7 @@ pub fn init(
         cull_comp_spv, 
         .@"1d",
         null,
-        null
+        DrawCullPushConstants
     );
     errdefer self.cull_pipeline.deinit(self.allocator);
 
@@ -137,8 +172,12 @@ pub fn init(
     self.transforms_buffer = try graphics.Buffer.init(command_count * @sizeOf([4][3]f32), .storage);
     errdefer self.transforms_buffer.deinit();
 
+    self.transforms = try self.transforms_buffer.map([4][3]f32);
+
     self.material_indices_buffer = try graphics.Buffer.init(command_count * @sizeOf(u32), .storage);
     errdefer self.material_indices_buffer.deinit();
+
+    self.material_indices = try self.material_indices_buffer.map(u32);
 
     self.materials_buffer = try graphics.Buffer.init(command_count * @sizeOf(Material), .storage);
     errdefer self.materials_buffer.deinit();
@@ -146,10 +185,15 @@ pub fn init(
     self.color_pipeline.setDescriptorBuffer(0, 0, self.vertex_buffer);
     self.color_pipeline.setDescriptorBuffer(1, 0, self.transforms_buffer);
     self.color_pipeline.setDescriptorBuffer(2, 0, self.material_indices_buffer);
-    self.color_pipeline.setDescriptorBuffer(3, 0, self.materials_buffer);
+    self.color_pipeline.setDescriptorBuffer(3, 0, self.draw_indirect_buffer);
+    self.color_pipeline.setDescriptorBuffer(4, 0, self.materials_buffer);
 
-    self.cull_pipeline.setDescriptorBuffer(4, 0, self.draw_indirect_buffer);
-    self.cull_pipeline.setDescriptorBuffer(5, 0, self.draw_indirect_count_buffer);
+    self.cull_pipeline.setDescriptorBuffer(0, 0, self.transforms_buffer);
+    self.cull_pipeline.setDescriptorBuffer(1, 0, self.mesh_buffer);
+    self.cull_pipeline.setDescriptorBuffer(2, 0, self.mesh_lod_buffer);
+    self.cull_pipeline.setDescriptorBuffer(3, 0, self.draw_indirect_buffer);
+    self.cull_pipeline.setDescriptorBuffer(4, 0, self.draw_indirect_count_buffer);
+    self.cull_pipeline.setDescriptorBuffer(5, 0, self.input_draw_buffer);
 }
 
 pub fn deinit() void 
@@ -164,18 +208,20 @@ pub fn deinit() void
     defer self.frame_fence.deinit();
     defer self.draw_indirect_buffer.deinit();
     defer self.draw_indirect_count_buffer.deinit();
+    defer self.input_draw_buffer.deinit();
+    defer self.mesh_buffer.deinit();
+    defer self.mesh_lod_buffer.deinit();
     defer self.vertex_buffer.deinit();
     defer self.index_buffer.deinit();
     defer self.cull_pipeline.deinit(self.allocator);
     defer self.color_pipeline.deinit();
     defer self.meshes.deinit(self.allocator);
+    defer self.mesh_lods.deinit(self.allocator);
     defer self.transforms_buffer.deinit();
     defer self.material_indices_buffer.deinit();
     defer self.materials.deinit(self.allocator);
     defer self.materials_buffer.deinit();
-    defer self.transforms.deinit(self.allocator);
     defer self.albedo_images.deinit(self.allocator);
-    defer self.material_indices.deinit(self.allocator);
     defer for (self.albedo_images.items) |*image|
     {
         image.deinit();
@@ -206,14 +252,28 @@ pub fn endRender() !void
     const image = self.swapchain.swap_images[image_index];
     const command_buffer = &self.command_buffers[image_index];
 
-    try self.transforms_buffer.update([4][3]f32, 0, self.transforms.items);
-    try self.material_indices_buffer.update(u32, 0, self.material_indices.items);
-    try self.materials_buffer.update(Material, 0, self.materials.items);
-    try self.draw_indirect_count_buffer.update(u32, 0, &.{ 0 });
+    if (self.mesh_data_changed)
+    {
+        try self.mesh_buffer.update(Mesh, 0, self.meshes.items);
+        try self.mesh_lod_buffer.update(MeshLod, 0, self.mesh_lods.items);
+
+        self.mesh_data_changed = false;
+    }
+
+    if (self.material_data_changed)
+    {
+        try self.materials_buffer.update(Material, 0, self.materials.items);
+
+        self.material_data_changed = false;
+    }
 
     {
         command_buffer.begin() catch unreachable;
         defer command_buffer.end();
+
+        // command_buffer.updateBuffer(self.transforms_buffer, 0, [4][3]f32, self.transforms.items);
+        // command_buffer.updateBuffer(self.material_indices_buffer, 0, u32, self.material_indices.items);
+        // command_buffer.updateBuffer(self.input_draw_buffer, 0, InputDraw, self.input_draws.items);
 
         GraphicsContext.self.vkd.cmdPipelineBarrier2(
             command_buffer.handle, 
@@ -280,7 +340,8 @@ pub fn endRender() !void
         //Color pass #1
         {
             command_buffer.setComputePipeline(self.cull_pipeline);
-            command_buffer.computeDispatch(self.draw_index, 1, 1);
+            
+            command_buffer.fillBuffer(self.draw_indirect_count_buffer, 0, @sizeOf(u32), 0);
 
             GraphicsContext.self.vkd.cmdPipelineBarrier2(
                 command_buffer.handle, 
@@ -292,16 +353,56 @@ pub fn endRender() !void
                     .p_buffer_memory_barriers = &[_]vk.BufferMemoryBarrier2
                     {
                         .{
+                            .src_stage_mask = .{ .copy_bit = true },
+                            .src_access_mask = .{ .transfer_write_bit = true },
+                            .dst_stage_mask = .{ .compute_shader_bit = true, },
+                            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
+                            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                            .buffer = self.draw_indirect_count_buffer.handle,
+                            .offset = 0,
+                            .size = self.draw_indirect_count_buffer.size,
+                        }
+                    },
+                    .image_memory_barrier_count = 0,
+                    .p_image_memory_barriers = undefined,
+                }
+            );
+
+            command_buffer.setPushData(DrawCullPushConstants, .{ .draw_count = self.draw_index });
+            command_buffer.computeDispatch(self.draw_index, 1, 1);
+
+            GraphicsContext.self.vkd.cmdPipelineBarrier2(
+                command_buffer.handle, 
+                &.{
+                    .dependency_flags = .{ .by_region_bit = true, },
+                    .memory_barrier_count = 0,
+                    .p_memory_barriers = undefined,
+                    .buffer_memory_barrier_count = 2,
+                    .p_buffer_memory_barriers = &[_]vk.BufferMemoryBarrier2
+                    {
+                        .{
                             .src_stage_mask = .{ .compute_shader_bit = true },
                             .src_access_mask = .{ .shader_write_bit = true },
-                            .dst_stage_mask = .{ .draw_indirect_bit = true },
-                            .dst_access_mask = .{ .indirect_command_read_bit = true },
+                            .dst_stage_mask = .{ .draw_indirect_bit = true, .all_graphics_bit = true },
+                            .dst_access_mask = .{ .indirect_command_read_bit = true, .shader_read_bit = true },
                             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                             .buffer = self.draw_indirect_buffer.handle,
                             .offset = 0,
                             .size = self.draw_indirect_buffer.size,
-                        }
+                        },
+                        .{
+                            .src_stage_mask = .{ .compute_shader_bit = true },
+                            .src_access_mask = .{ .shader_write_bit = true },
+                            .dst_stage_mask = .{ .draw_indirect_bit = true, },
+                            .dst_access_mask = .{ .indirect_command_read_bit = true },
+                            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                            .buffer = self.draw_indirect_count_buffer.handle,
+                            .offset = 0,
+                            .size = self.draw_indirect_count_buffer.size,
+                        },
                     },
                     .image_memory_barrier_count = 0,
                     .p_image_memory_barriers = undefined,
@@ -381,6 +482,7 @@ pub fn endRender() !void
             command_buffer.drawIndexedIndirectCount(
                 self.draw_indirect_buffer, 
                 0, 
+                @sizeOf(DrawCommand),
                 self.draw_indirect_count_buffer,
                 0,
                 self.draw_index
@@ -479,15 +581,18 @@ pub fn endRender() !void
 
     self.frame_fence.wait();
     self.frame_fence.reset();
-
-    self.transforms.clearRetainingCapacity();
-    self.material_indices.clearRetainingCapacity();
 }
 
 const Mesh = extern struct 
 {
     vertex_offset: u32,
     vertex_count: u32,
+    lod_offset: u32,
+    lod_count: u32,
+};
+
+const MeshLod = extern struct 
+{
     index_offset: u32,
     index_count: u32,
 };
@@ -501,11 +606,19 @@ pub fn createMesh(
 {
     const mesh_handle = @intCast(u32, self.meshes.items.len);
 
+    const lod_offset = @intCast(u32, self.mesh_lods.items.len);
+    const lod_count = 1;
+
+    try self.mesh_lods.append(self.allocator, .{
+        .index_offset = @intCast(u32, self.index_offset),
+        .index_count = @intCast(u32, indices.len),
+    });
+
     try self.meshes.append(self.allocator, .{
         .vertex_offset = @intCast(u32, self.vertex_offset),
         .vertex_count = @intCast(u32, vertices.len),
-        .index_offset = @intCast(u32, self.index_offset),
-        .index_count = @intCast(u32, indices.len),
+        .lod_offset  = lod_offset,
+        .lod_count = lod_count,
     });
 
     try self.vertex_buffer.update(Vertex, self.vertex_offset, vertices);
@@ -513,6 +626,8 @@ pub fn createMesh(
 
     try self.index_buffer.update(u32, self.index_offset, indices);
     self.index_offset += indices.len * @sizeOf(u32);
+
+    self.mesh_data_changed = true;
 
     return @intToEnum(MeshHandle, mesh_handle);
 }
@@ -576,12 +691,14 @@ pub fn createMaterial(
 
     std.log.debug("Created material {}", .{ material_handle });
 
-    self.color_pipeline.setDescriptorImageSampler(4, material_handle, albedo_image, albedo_sampler);
+    self.color_pipeline.setDescriptorImageSampler(5, material_handle, albedo_image, albedo_sampler);
 
     try self.materials.append(self.allocator, .{
         .albedo_texture_index = material_handle,
         .albedo_color = packUnorm4x8(albedo_color)
     });
+
+    self.material_data_changed = true;
 
     return @intToEnum(MaterialHandle, material_handle);
 }
@@ -600,31 +717,18 @@ pub fn drawMesh(
     transform: zalgebra.Mat4x4(f32),
 ) void 
 {
-    const mesh_data: Mesh = self.meshes.items[@enumToInt(mesh)];
-
-    self.draws[self.draw_index] = .{
-        .first_index = mesh_data.index_offset / @sizeOf(u32),
-        .index_count = mesh_data.index_count,
-        .vertex_offset = @intCast(i32, mesh_data.vertex_offset / @sizeOf(Vertex)),
-        .first_instance = self.draw_index, 
-        .instance_count = 0,
+    self.input_draws[self.draw_index] = .{
+        .mesh_index = @enumToInt(mesh),
     };
 
-    self.transforms.append(
-        self.allocator,
-        [4][3]f32
-        {
-            transform.data[0][0..3].*,
-            transform.data[1][0..3].*,
-            transform.data[2][0..3].*,
-            transform.data[3][0..3].*,
-        }
-    ) catch unreachable;
+    self.transforms[self.draw_index] = .{
+        transform.data[0][0..3].*,
+        transform.data[1][0..3].*,
+        transform.data[2][0..3].*,
+        transform.data[3][0..3].*,
+    };
 
-    self.material_indices.append(
-        self.allocator, 
-        @enumToInt(material)
-    ) catch unreachable;
+    self.material_indices[self.draw_index] = @enumToInt(material);
 
     self.draw_index += 1;
 }
