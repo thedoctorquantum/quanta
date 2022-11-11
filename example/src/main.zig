@@ -118,6 +118,8 @@ pub fn main() !void
         test_scene_meshes[i] = try Renderer3D.createMesh(
             test_scene_import.vertices[sub_mesh.vertex_offset..sub_mesh.vertex_offset + sub_mesh.vertex_count], 
             test_scene_import.indices[sub_mesh.index_offset..sub_mesh.index_offset + sub_mesh.index_count],
+            sub_mesh.bounding_min,
+            sub_mesh.bounding_max,
         );
     }
 
@@ -144,6 +146,8 @@ pub fn main() !void
             },
         }, 
         &[_]u32 { 0, 1, 2 },
+        .{ 0, 0, 0 },
+        .{ 0, 0, 0 },
     );
 
     const second_mesh = try Renderer3D.createMesh(
@@ -169,6 +173,8 @@ pub fn main() !void
             },
         }, 
         &[_]u32 { 0, 1, 2 },
+        .{ 0, 0, 0 },
+        .{ 0, 0, 0 },
     );
 
     const material2 = try Renderer3D.createMaterial(

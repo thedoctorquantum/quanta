@@ -18,6 +18,8 @@ pub const Import = struct
         index_count: u32,
         material_index: u32,
         transform: [4][4]f32,
+        bounding_min: [3]f32,
+        bounding_max: [3]f32,
     };
 
     pub const Material = struct 
@@ -153,6 +155,9 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
         std.log.info("node.children_count = {}", .{ node.children_count });
         std.log.info("mesh.primitive_count = {}", .{ mesh.primitives_count });
 
+        var bounding_min: @Vector(3, f32) = .{ 0, 0, 0 };
+        var bounding_max: @Vector(3, f32) = .{ 0, 0, 0 };
+
         for (mesh.primitives[0..mesh.primitives_count]) |primitive|
         {
             var vertex_count: usize = 0;
@@ -189,7 +194,7 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                 }
                 else if (std.cstr.cmp(attribute.name, "COLOR_0") == 0)
                 {
-                    
+                    unreachable;
                 }
 
                 std.log.info("Mesh primitive attribute {s}", .{ attribute.name });
@@ -217,8 +222,16 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                         .uv = .{ texture_coordinates.?[uv_index], texture_coordinates.?[uv_index + 1] }, 
                         .color = packUnorm4x8(.{ 1, 1, 1, 1 }),
                     });
+
+                    const position_vector = @Vector(3, f32) { positions.?[position_index], positions.?[position_index + 1], positions.?[position_index + 2], };
+
+                    bounding_min = @min(bounding_min, position_vector);
+                    bounding_max = @max(bounding_max, position_vector);
                 }
             }
+
+            std.log.info("bounding_min: {d}", .{ bounding_min });
+            std.log.info("bounding_max: {d}", .{ bounding_max });
 
             //Indices
             {
@@ -268,6 +281,8 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
             .index_count = @intCast(u32, model_indices.items.len - index_start),
             .material_index = 0,
             .transform = transform_matrix,
+            .bounding_min = bounding_min,
+            .bounding_max = bounding_max,
         });
     }
 

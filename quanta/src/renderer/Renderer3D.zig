@@ -246,6 +246,20 @@ pub fn beginRender(camera: Camera) void
     self.camera = camera;
 }
 
+fn perspectiveProjection(fovy_degrees: f32, aspect_ratio: f32, znear: f32) zalgebra.Mat4 
+{
+    const f = 1 / std.math.tan(std.math.degreesToRadians(f32, fovy_degrees) / 2);
+
+    return .{
+        .data = .{
+            .{ f / aspect_ratio, 0, 0, 0 },
+            .{ 0, f, 0, 0 },
+            .{ 0, 0, 0, -1 },
+            .{ 0, 0, znear, 0 },
+        },
+    };
+}
+
 pub fn endRender() !void
 {
     const image_index = self.swapchain.image_index;
@@ -432,7 +446,7 @@ pub fn endRender() !void
                 .store_op = .dont_care,
                 .clear_value = .{ 
                     .depth_stencil = .{ 
-                        .depth = 1,
+                        .depth = 0,
                         .stencil = 1,
                     },
                 },
@@ -459,8 +473,12 @@ pub fn endRender() !void
             const aspect_ratio: f32 = @intToFloat(f32, window.getWidth()) / @intToFloat(f32, window.getHeight());  
             const near_plane: f32 = 0.01;
             const far_plane: f32 = 1000;
+
+            _ = far_plane;
+
             const fov: f32 = self.camera.fov;
-            const projection = zalgebra.perspective(fov, aspect_ratio, near_plane, far_plane);
+            // const projection = zalgebra.perspective(fov, aspect_ratio, near_plane, far_plane);
+            const projection = perspectiveProjection(fov, aspect_ratio, near_plane);
             const view_projection = projection.mul(
                 zalgebra.lookAt(
                     .{ .data = self.camera.translation }, 
@@ -584,6 +602,8 @@ const Mesh = extern struct
     vertex_count: u32,
     lod_offset: u32,
     lod_count: u32,
+    bounding_box_min: [3]f32,
+    bounding_box_max: [3]f32,
 };
 
 const MeshLod = extern struct 
@@ -597,6 +617,8 @@ pub const MeshHandle = enum(u32) { _ };
 pub fn createMesh(
     vertices: []const Vertex,
     indices: []const u32,
+    bounding_box_min: [3]f32,
+    bounding_box_max: [3]f32,
 ) !MeshHandle
 {
     const mesh_handle = @intCast(u32, self.meshes.items.len);
@@ -614,6 +636,8 @@ pub fn createMesh(
         .vertex_count = @intCast(u32, vertices.len),
         .lod_offset  = lod_offset,
         .lod_count = lod_count,
+        .bounding_box_min = bounding_box_min,
+        .bounding_box_max = bounding_box_max,
     });
 
     try self.vertex_buffer.update(Vertex, self.vertex_offset, vertices);

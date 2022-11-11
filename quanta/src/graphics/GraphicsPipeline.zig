@@ -370,7 +370,7 @@ pub fn init(
                     .flags = .{},
                     .depth_test_enable = vk.TRUE,
                     .depth_write_enable = vk.TRUE,
-                    .depth_compare_op = .less_or_equal,
+                    .depth_compare_op = .greater, //Reverse z by default (? mabye)
                     .depth_bounds_test_enable = vk.FALSE,
                     .stencil_test_enable = vk.FALSE,
                     .front = std.mem.zeroes(vk.StencilOpState),

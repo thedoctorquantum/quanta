@@ -19,6 +19,8 @@ struct Mesh
     u32 vertex_start;
     u32 lod_begin;
     u32 lod_count;
+    vec3 bounding_box_min;
+    vec3 bounding_box_max;
 };
 
 struct MeshLod 
@@ -70,6 +72,8 @@ layout(set = 0, binding = 5, scalar) restrict readonly buffer InputDraws
 layout(push_constant) uniform PushConstants
 {
     u32 draw_count;
+    // float P00, P11, znear, zfar; // symmetric projection parameters
+	// float frustum[4]; // data for left/right/top/bottom frustum planes
 };
 
 void main() 
@@ -81,12 +85,13 @@ void main()
 
     InputDraw draw = input_draws[read_draw_index];
     Mesh mesh = meshes[draw.mesh_index];
-    MeshLod mesh_lod = mesh_lods[mesh.lod_begin];
 
     bool visible = true;
 
     if (visible)
     {
+        MeshLod mesh_lod = mesh_lods[mesh.lod_begin];
+
         u32 write_draw_index = atomicAdd(draw_command_count, 1);
 
         draw_commands[write_draw_index].first_index = mesh_lod.index_offset;
