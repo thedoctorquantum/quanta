@@ -89,9 +89,9 @@ void main()
     {
         u32 write_draw_index = atomicAdd(draw_command_count, 1);
 
-        draw_commands[write_draw_index].first_index = mesh_lod.index_offset / 4;
+        draw_commands[write_draw_index].first_index = mesh_lod.index_offset;
         draw_commands[write_draw_index].index_count = mesh_lod.index_count;
-        draw_commands[write_draw_index].vertex_offset = mesh.vertex_offset / 36;
+        draw_commands[write_draw_index].vertex_offset = mesh.vertex_offset;
         draw_commands[write_draw_index].first_instance = 0;
         draw_commands[write_draw_index].instance_count = 1;
         draw_commands[write_draw_index].instance_index = read_draw_index;

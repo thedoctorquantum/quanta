@@ -103,9 +103,23 @@ pub fn main() !void
     const wood_floor_import = try png.import(allocator, @embedFile("assets/wood_floor.png"));
     defer allocator.free(wood_floor_import.data);
 
-    const test_scene_import = try gltf.import(allocator, "example/src/assets/test_scene.gltf");
-    defer allocator.free(test_scene_import.vertices);
-    defer allocator.free(test_scene_import.indices);
+    const test_scene_file_path = "example/src/assets/test_scene.gltf";
+    // const test_scene_file_path = "example/src/assets/DragonAttenuation.glb";
+    // const test_scene_file_path = "example/src/assets/BoxVertexColors.gltf";
+
+    const test_scene_import = try gltf.import(allocator, test_scene_file_path);
+    defer gltf.importFree(test_scene_import, allocator);
+
+    const test_scene_meshes = try allocator.alloc(Renderer3D.MeshHandle, test_scene_import.sub_meshes.len);
+    defer allocator.free(test_scene_meshes);
+
+    for (test_scene_import.sub_meshes) |sub_mesh, i|
+    {
+        test_scene_meshes[i] = try Renderer3D.createMesh(
+            test_scene_import.vertices[sub_mesh.vertex_offset..sub_mesh.vertex_offset + sub_mesh.vertex_count], 
+            test_scene_import.indices[sub_mesh.index_offset..sub_mesh.index_offset + sub_mesh.index_count],
+        );
+    }
 
     const triangle_mesh = try Renderer3D.createMesh(
         &[_]Renderer3D.Vertex
@@ -155,11 +169,6 @@ pub fn main() !void
             },
         }, 
         &[_]u32 { 0, 1, 2 },
-    );
-
-    const test_scene_mesh = try Renderer3D.createMesh(
-        test_scene_import.vertices, 
-        test_scene_import.indices
     );
 
     const material2 = try Renderer3D.createMaterial(
@@ -299,15 +308,14 @@ pub fn main() !void
             Renderer3D.beginRender(camera);
             defer Renderer3D.endRender() catch unreachable;
 
-            Renderer3D.drawMesh(test_scene_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
-                .{  
-                    .data = .{ 0, 2, 0 }
-                }
-            ));
+            for (test_scene_import.sub_meshes) |sub_mesh, i|
+            {
+                Renderer3D.drawMesh(test_scene_meshes[i], material2, quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
+            }
 
             var i: isize = 0;
 
-            const mesh_square_size = 50;
+            const mesh_square_size = 10;
 
             while (i < mesh_square_size) : (i += 1)
             {
@@ -315,7 +323,7 @@ pub fn main() !void
 
                 while (j < mesh_square_size) : (j += 1)
                 {
-                        Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else test_scene_mesh, if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
+                        Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else test_scene_meshes[0], if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
                         .{  
                             .data = .{ 5 + @intToFloat(f32, -1 * i * 10), 0.5 + y_offset + @intToFloat(f32, (i + j * mesh_square_size)) / 100, @intToFloat(f32, -1 * j * 10) }
                         }

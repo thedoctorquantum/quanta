@@ -7,20 +7,45 @@ pub const Import = struct
 {
     vertices: []Renderer3D.Vertex,
     indices: []u32,
+    sub_meshes: []SubMesh,
+    materials: []Material,
+
+    pub const SubMesh = struct 
+    {
+        vertex_offset: u32,
+        vertex_count: u32,
+        index_offset: u32,
+        index_count: u32,
+        material_index: u32,
+        transform: [4][4]f32,
+    };
+
+    pub const Material = struct 
+    {
+        albedo: [4]f32,
+    };
 };
 
 pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import 
 {
-    var import_data: Import = undefined;
+    var import_data: Import = .{
+        .vertices = &.{},
+        .indices = &.{},
+        .sub_meshes = &.{},
+        .materials = &.{},
+    };
 
     var cgltf_data: [*c]cgltf.cgltf_data = null;
 
     const file_extension = std.fs.path.extension(file_path);
+
+    std.log.info("file_extension: {s}", .{ file_extension });
+
     const file_type = if (std.mem.eql(u8, file_extension, ".gltf")) 
         cgltf.cgltf_file_type_gltf
     else if (std.mem.eql(u8, file_extension, ".glb"))
         cgltf.cgltf_file_type_glb
-    else cgltf.cgltf_file_type_gltf;
+    else unreachable;
 
     const cgltf_options = cgltf.cgltf_options 
     {
@@ -94,6 +119,12 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
     var model_indices = std.ArrayList(u32).init(allocator);
     defer model_indices.deinit();
 
+    var sub_meshes = std.ArrayList(Import.SubMesh).init(allocator);
+    defer sub_meshes.deinit();
+
+    var materials = std.ArrayList(Import.Material).init(allocator);
+    defer materials.deinit();
+
     std.log.info("scene_count: {}", .{ cgltf_data.*.scenes_count });
     std.log.info("node_count: {}", .{ cgltf_data.*.nodes_count });
 
@@ -114,19 +145,16 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
         std.debug.assert(node_ptr.*.mesh != null);
 
         const node = node_ptr.*;
-        const mesh = node.mesh.*;
+        const mesh = node_ptr.*.mesh.*;
+
+        const vertex_start = model_vertices.items.len;
+        const index_start = model_indices.items.len;
 
         std.log.info("node.children_count = {}", .{ node.children_count });
         std.log.info("mesh.primitive_count = {}", .{ mesh.primitives_count });
 
         for (mesh.primitives[0..mesh.primitives_count]) |primitive|
         {
-            const vertex_start = model_vertices.items.len; 
-            const index_start = model_indices.items.len;
-
-            _ = vertex_start;
-            _ = index_start;
-
             var vertex_count: usize = 0;
             var positions: ?[]const f32 = null; 
             var normals: ?[]const f32 = null; 
@@ -134,6 +162,8 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
 
             for (primitive.attributes[0..primitive.attributes_count]) |attribute|
             {
+                if (attribute.data == null) continue;
+
                 const buffer_view = attribute.data.*.buffer_view;
 
                 if (std.cstr.cmp(attribute.name, "POSITION") == 0)
@@ -156,6 +186,10 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                     texture_coordinates = @ptrCast([*]const f32, @alignCast(@alignOf(f32),
                                     @ptrCast([*]u8, buffer_view.*.buffer.*.data.?) + attribute.data.*.offset + buffer_view.*.offset))
                                     [0..(attribute.data.*.count * 2)];
+                }
+                else if (std.cstr.cmp(attribute.name, "COLOR_0") == 0)
+                {
+                    
                 }
 
                 std.log.info("Mesh primitive attribute {s}", .{ attribute.name });
@@ -183,12 +217,6 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                         .uv = .{ texture_coordinates.?[uv_index], texture_coordinates.?[uv_index + 1] }, 
                         .color = packUnorm4x8(.{ 1, 1, 1, 1 }),
                     });
-
-                    const position = &model_vertices.items[model_vertices.items.len - 1].position;
-
-                    const transformed_position = (zalgebra.Mat4 { .data = transform_matrix }).mulByVec4(.{ .data = .{ position[0], position[1], position[2], 1 } }).data;
-
-                    position.* = .{ transformed_position[0], transformed_position[1], transformed_position[2] };
                 }
             }
 
@@ -232,6 +260,15 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                 }
             }
         }
+
+        try sub_meshes.append(.{
+            .vertex_offset = @intCast(u32, vertex_start),
+            .vertex_count = @intCast(u32, model_vertices.items.len - vertex_start),
+            .index_offset = @intCast(u32, index_start),
+            .index_count = @intCast(u32, model_indices.items.len - index_start),
+            .material_index = 0,
+            .transform = transform_matrix,
+        });
     }
 
     std.log.info("unique vertex count: {}", .{ model_vertices.items.len });
@@ -239,8 +276,18 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
 
     import_data.vertices = model_vertices.toOwnedSlice();
     import_data.indices = model_indices.toOwnedSlice();
+    import_data.sub_meshes = sub_meshes.toOwnedSlice();
+    import_data.materials = materials.toOwnedSlice();
 
     return import_data;
+}
+
+pub fn importFree(gltf_import: Import, allocator: std.mem.Allocator) void 
+{
+    allocator.free(gltf_import.vertices);
+    allocator.free(gltf_import.indices);
+    allocator.free(gltf_import.sub_meshes);
+    allocator.free(gltf_import.materials);
 }
 
 fn packUnorm4x8(v: [4]f32) u32

@@ -117,7 +117,7 @@ pub fn init(
     self.frame_fence = try graphics.Fence.init();
     errdefer self.frame_fence.deinit();
 
-    const command_count = 4096 * 16;
+    const command_count = 4096 * 32;
 
     self.draw_indirect_buffer = try graphics.Buffer.init(command_count * @sizeOf(DrawCommand), .indirect_draw);
     errdefer self.draw_indirect_buffer.deinit();
@@ -270,10 +270,6 @@ pub fn endRender() !void
     {
         command_buffer.begin() catch unreachable;
         defer command_buffer.end();
-
-        // command_buffer.updateBuffer(self.transforms_buffer, 0, [4][3]f32, self.transforms.items);
-        // command_buffer.updateBuffer(self.material_indices_buffer, 0, u32, self.material_indices.items);
-        // command_buffer.updateBuffer(self.input_draw_buffer, 0, InputDraw, self.input_draws.items);
 
         GraphicsContext.self.vkd.cmdPipelineBarrier2(
             command_buffer.handle, 
@@ -559,8 +555,7 @@ pub fn endRender() !void
         }
     }, self.frame_fence.handle);
 
-    _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{
-        .wait_semaphore_count = 1,
+    _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{.wait_semaphore_count = 1,
         .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &image.render_finished),
         .swapchain_count = 1,
         .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.swapchain.handle),
@@ -610,12 +605,12 @@ pub fn createMesh(
     const lod_count = 1;
 
     try self.mesh_lods.append(self.allocator, .{
-        .index_offset = @intCast(u32, self.index_offset),
+        .index_offset = @intCast(u32, self.index_offset / @sizeOf(u32)),
         .index_count = @intCast(u32, indices.len),
     });
 
     try self.meshes.append(self.allocator, .{
-        .vertex_offset = @intCast(u32, self.vertex_offset),
+        .vertex_offset = @intCast(u32, self.vertex_offset / @sizeOf(Vertex)),
         .vertex_count = @intCast(u32, vertices.len),
         .lod_offset  = lod_offset,
         .lod_count = lod_count,
