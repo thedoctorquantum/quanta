@@ -108,14 +108,86 @@ pub fn submitAndWait(self: CommandBuffer) !void
     try Context.self.vkd.resetFences(Context.self.device, 1, @ptrCast([*]const vk.Fence, &self.wait_fence));
 }
 
-pub fn beginRenderPass(self: CommandBuffer) void 
+pub const Attachment = struct 
 {
-    _ = self;
+    image: *const Image,
+    clear: ?Clear,
+
+    pub const Clear = union(enum)
+    {
+        color: [4]f32,
+        depth: f32,
+    };
+};
+
+pub fn beginRenderPass(
+    self: CommandBuffer, 
+    offset_x: i32,
+    offset_y: i32,
+    width: u32,
+    height: u32,
+    color_attachments: []Attachment, 
+    depth_attachment: ?Attachment
+) void 
+{
+    var color_attachment_infos: [8]vk.RenderingAttachmentInfo = undefined;
+
+    for (color_attachments) |color_attachment, i|
+    {
+        color_attachment_infos[i] = .{
+            .image_view = color_attachment.image.view,
+            .image_layout = .attachment_optimal,
+            .resolve_mode = .{},
+            .resolve_image_view = .null_handle,
+            .resolve_image_layout = .@"undefined",
+            .load_op = if (color_attachment.clear != null) .clear else .load,
+            .store_op = .store,
+            .clear_value = if (color_attachment.clear != null) switch (color_attachment.clear.?)
+            {
+                .color => .{ .color = .{ .float_32 = color_attachment.clear.?.color } },
+                .depth => .{ .depth_stencil = .{ .depth = color_attachment.clear.?.depth, .stencil = 1, } },
+            } else .{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } },
+        };
+    }
+
+    var depth_attachment_info: vk.RenderingAttachmentInfo = undefined;
+
+    if (depth_attachment != null)
+    {
+        depth_attachment_info = .{
+            .image_view = depth_attachment.?.image.view,
+            .image_layout = .attachment_optimal,
+            .resolve_mode = .{},
+            .resolve_image_view = .null_handle,
+            .resolve_image_layout = .@"undefined",
+            .load_op = if (depth_attachment.?.clear != null) .clear else .load,
+            .store_op = .store, //May want to set this to dont_care to let the driver optimise 
+            .clear_value = if (depth_attachment.?.clear != null) switch (depth_attachment.?.clear.?)
+            {
+                .color => .{ .color = .{ .float_32 = depth_attachment.?.clear.?.color } },
+                .depth => .{ .depth_stencil = .{ .depth = depth_attachment.?.clear.?.depth, .stencil = 1, } },
+            } else .{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } },
+        };
+    }
+
+    Context.self.vkd.cmdBeginRendering(self.handle, &.{
+        .flags = .{},
+        .render_area = .{ 
+            .offset = .{ .x = offset_x, .y = offset_y }, 
+            .extent = .{ .width = width, .height = height } 
+        },
+        .layer_count = 1,
+        .view_mask = 0,
+        .color_attachment_count = @intCast(u32, color_attachments.len),
+        .p_color_attachments = &color_attachment_infos,
+        .p_depth_attachment = if (depth_attachment != null) &depth_attachment_info else null,
+        .p_stencil_attachment = null,
+    });
 }
 
 pub fn endRenderPass(self: CommandBuffer) void 
 {
-    _ = self;
+    Context.self.vkd.cmdEndRendering(self.handle);
 }
 
 pub fn setGraphicsPipeline(self: *CommandBuffer, pipeline: GraphicsPipeline) void 

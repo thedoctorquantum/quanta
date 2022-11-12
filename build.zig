@@ -115,6 +115,8 @@ pub fn build(builder: *std.build.Builder) !void
 
         try compileShader(builder, mode, "vert", "quanta/src/renderer/tri.vert.glsl", "quanta/src/renderer/spirv/tri.vert.spv");
         try compileShader(builder, mode, "frag", "quanta/src/renderer/tri.frag.glsl", "quanta/src/renderer/spirv/tri.frag.spv");
+        try compileShader(builder, mode, "vert", "quanta/src/renderer/depth.vert.glsl", "quanta/src/renderer/spirv/depth.vert.spv");
+        try compileShader(builder, mode, "frag", "quanta/src/renderer/depth.frag.glsl", "quanta/src/renderer/spirv/depth.frag.spv");
         try compileShader(builder, mode, "comp", "quanta/src/renderer/cull.comp.glsl", "quanta/src/renderer/spirv/cull.comp.spv");
 
         const run_cmd = exe.run();

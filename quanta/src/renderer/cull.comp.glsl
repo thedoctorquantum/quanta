@@ -19,8 +19,8 @@ struct Mesh
     u32 vertex_start;
     u32 lod_begin;
     u32 lod_count;
-    vec3 bounding_box_min;
-    vec3 bounding_box_max;
+    vec3 bounding_box_center;
+    vec3 bounding_box_extents;
 };
 
 struct MeshLod 
@@ -69,12 +69,60 @@ layout(set = 0, binding = 5, scalar) restrict readonly buffer InputDraws
     InputDraw input_draws[];
 };
 
-layout(push_constant) uniform PushConstants
+layout(push_constant, scalar) uniform PushConstants
 {
     u32 draw_count;
-    // float P00, P11, znear, zfar; // symmetric projection parameters
-	// float frustum[4]; // data for left/right/top/bottom frustum planes
+
+    //not very memory efficient 
+    vec4 near_face;
+    vec4 far_face;
+    vec4 right_face;
+    vec4 left_face;
+    vec4 top_face;
+    vec4 bottom_face;
 };
+
+bool isOnOrForwardPlane(vec4 plan, vec3 center, vec3 extents)
+{
+    f32 r = extents.x * abs(plan.x) + 
+            extents.y * abs(plan.y) +
+            extents.z * abs(plan.z);
+
+    return -r <= (dot(plan.xyz, center) - plan.z);
+}
+
+bool isOnFrustum(mat4 transform, vec3 center, vec3 extents) 
+{
+    vec3 global_center = vec3(transform * vec4(center, 1));
+
+    vec3 right = vec3(transform[0]) * extents.x;
+    vec3 up = vec3(transform[1]) * extents.y;
+    vec3 forward = vec3(-transform[2]) * extents.z;
+
+    f32 newIi = 
+        abs(dot(vec3(1, 0, 0), right)) +
+        abs(dot(vec3(1, 0, 0), up)) +
+        abs(dot(vec3(1, 0, 0), forward));
+
+    f32 newIj = 
+        abs(dot(vec3(0, 1, 0), right)) +
+        abs(dot(vec3(0, 1, 0), up)) +
+        abs(dot(vec3(0, 1, 0), forward));
+    
+    f32 newIk = 
+        abs(dot(vec3(0, 0, 1), right)) +
+        abs(dot(vec3(0, 0, 1), up)) +
+        abs(dot(vec3(0, 0, 1), forward));
+    
+    vec3 global_extents = vec3(newIi, newIj, newIk);
+
+    return isOnOrForwardPlane(near_face, global_center, global_extents);
+           isOnOrForwardPlane(far_face, global_center, global_extents) &&
+           isOnOrForwardPlane(right_face, global_center, global_extents) &&
+           isOnOrForwardPlane(left_face, global_center, global_extents) &&
+           isOnOrForwardPlane(top_face, global_center, global_extents) &&
+           isOnOrForwardPlane(bottom_face, global_center, global_extents);
+}
 
 void main() 
 {
@@ -87,6 +135,8 @@ void main()
     Mesh mesh = meshes[draw.mesh_index];
 
     bool visible = true;
+
+    // visible = visible && isOnFrustum(mat4(transforms[draw.mesh_index]), mesh.bounding_box_center, mesh.bounding_box_extents);
 
     if (visible)
     {

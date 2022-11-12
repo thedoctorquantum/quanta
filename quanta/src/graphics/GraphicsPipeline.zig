@@ -23,6 +23,23 @@ pub const Options = struct
     stencil_attachment_format: ?vk.Format = null,
     vertex_shader_binary: []align(4) const u8,
     fragment_shader_binary: []align(4) const u8,
+    depth_state: DepthState,
+
+    pub const DepthState = struct 
+    {
+        write_enabled: bool = false,
+        test_enabled: bool = false,
+        compare_op: CompareOp = .greater,
+
+        pub const CompareOp = enum 
+        {
+            less,
+            less_or_equal,
+            greater,
+            greater_or_equal,
+            always,
+        };
+    };
 };
 
 fn getAttributeFormat(comptime T: type) vk.Format 
@@ -180,22 +197,22 @@ pub fn init(
         }
     };
 
-    const Static = struct 
-    {
-        var descriptor_set_layouts: [1]vk.DescriptorSetLayout = undefined;
-        var descriptor_sets: [1]vk.DescriptorSet = undefined;
-    };
-
     var self = GraphicsPipeline
     {
         .handle = .null_handle,
         .layout = .null_handle,
         .vertex_shader = .null_handle,
         .fragment_shader = .null_handle,
-        .descriptor_set_layouts = &Static.descriptor_set_layouts,
-        .descriptor_sets = &Static.descriptor_sets,
+        .descriptor_set_layouts = &.{},
+        .descriptor_sets = &.{},
         .descriptor_pool = .null_handle,
     };
+
+    self.descriptor_set_layouts = try allocator.alloc(vk.DescriptorSetLayout, 1);
+    errdefer allocator.free(self.descriptor_set_layouts);
+
+    self.descriptor_sets = try allocator.alloc(vk.DescriptorSet, 1);
+    errdefer allocator.free(self.descriptor_sets);
 
     self.descriptor_pool = try Context.self.vkd.createDescriptorPool(Context.self.device, &.{
         .flags = .{ .update_after_bind_bit = true,  },
@@ -205,7 +222,7 @@ pub fn init(
     }, &Context.self.allocation_callbacks);
     errdefer Context.self.vkd.destroyDescriptorPool(Context.self.device, self.descriptor_pool, &Context.self.allocation_callbacks);
 
-    for (Static.descriptor_set_layouts) |*descriptor_set_layout, i|
+    for (self.descriptor_set_layouts) |*descriptor_set_layout, i|
     {
         descriptor_set_layout.* = try Context.self.vkd.createDescriptorSetLayout(
             Context.self.device,
@@ -214,17 +231,17 @@ pub fn init(
         );
     }
 
-    errdefer for (Static.descriptor_set_layouts) |descriptor_set_layout|
+    errdefer for (self.descriptor_set_layouts) |descriptor_set_layout|
     {
         Context.self.vkd.destroyDescriptorSetLayout(Context.self.device, descriptor_set_layout, &Context.self.allocation_callbacks);
     };
 
     try Context.self.vkd.allocateDescriptorSets(Context.self.device, &.{
         .descriptor_pool = self.descriptor_pool,
-        .descriptor_set_count = Static.descriptor_set_layouts.len,
-        .p_set_layouts = &Static.descriptor_set_layouts,
-    }, &Static.descriptor_sets);
-    errdefer Context.self.vkd.freeDescriptorSets(Context.self.device, self.descriptor_pool, Static.descriptor_sets.len, &Static.descriptor_sets) catch unreachable;
+        .descriptor_set_count = @intCast(u32, self.descriptor_set_layouts.len),
+        .p_set_layouts = self.descriptor_set_layouts.ptr,
+    }, self.descriptor_sets.ptr);
+    errdefer Context.self.vkd.freeDescriptorSets(Context.self.device, self.descriptor_pool, @intCast(u32, self.descriptor_sets.len), self.descriptor_sets.ptr) catch unreachable;
 
     self.layout = try Context.self.vkd.createPipelineLayout(
         Context.self.device, 
@@ -368,9 +385,16 @@ pub fn init(
                 },
                 .p_depth_stencil_state = &.{
                     .flags = .{},
-                    .depth_test_enable = vk.TRUE,
-                    .depth_write_enable = vk.TRUE,
-                    .depth_compare_op = .greater, //Reverse z by default (? mabye)
+                    .depth_test_enable = @boolToInt(options.depth_state.test_enabled),
+                    .depth_write_enable = @boolToInt(options.depth_state.write_enabled),
+                    .depth_compare_op = @as(vk.CompareOp, switch (options.depth_state.compare_op)
+                    {
+                        .less => .less,
+                        .less_or_equal => .less_or_equal,
+                        .greater => .greater,
+                        .greater_or_equal => .greater_or_equal,
+                        .always => .always,
+                    }),
                     .depth_bounds_test_enable = vk.FALSE,
                     .stencil_test_enable = vk.FALSE,
                     .front = std.mem.zeroes(vk.StencilOpState),
@@ -390,7 +414,7 @@ pub fn init(
                             .b_bit = true,
                             .a_bit = true,   
                         },
-                        .blend_enable = vk.TRUE,
+                        .blend_enable = vk.FALSE,
                         .src_color_blend_factor = .one,
                         .dst_color_blend_factor = .zero,
                         .color_blend_op = .add,
@@ -419,7 +443,7 @@ pub fn init(
     return self;
 }
 
-pub fn deinit(self: *GraphicsPipeline) void 
+pub fn deinit(self: *GraphicsPipeline, allocator: std.mem.Allocator) void 
 {
     defer self.* = undefined;
 
@@ -430,6 +454,8 @@ pub fn deinit(self: *GraphicsPipeline) void
         &Context.self.allocation_callbacks
     );
 
+    defer allocator.free(self.descriptor_set_layouts);
+    defer allocator.free(self.descriptor_sets);
     defer for (self.descriptor_set_layouts) |descriptor_set_layout|
     {
         Context.self.vkd.destroyDescriptorSetLayout(Context.self.device, descriptor_set_layout, &Context.self.allocation_callbacks);

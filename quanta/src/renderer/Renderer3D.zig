@@ -14,6 +14,9 @@ const cull_comp_spv = @alignCast(4, @embedFile("spirv/cull.comp.spv"));
 const tri_vert_spv = @alignCast(4, @embedFile("spirv/tri.vert.spv"));
 const tri_frag_spv = @alignCast(4, @embedFile("spirv/tri.frag.spv"));
 
+const depth_vert_spv = @alignCast(4, @embedFile("spirv/depth.vert.spv"));
+const depth_frag_spv = @alignCast(4, @embedFile("spirv/depth.frag.spv"));
+
 const ColorPassPushConstants = extern struct 
 {
     view_projection: [4][4]f32,
@@ -22,6 +25,12 @@ const ColorPassPushConstants = extern struct
 const DrawCullPushConstants = extern struct 
 {
     draw_count: u32,
+    near_face: [4]f32,
+    far_face: [4]f32,
+    right_face: [4]f32,
+    left_face: [4]f32,
+    top_face: [4]f32,
+    bottom_face: [4]f32,
 };
 
 const InputDraw = extern struct 
@@ -49,6 +58,7 @@ index_buffer: graphics.Buffer,
 index_offset: usize,
 
 cull_pipeline: graphics.ComputePipeline,
+depth_pipeline: graphics.GraphicsPipeline,
 color_pipeline: graphics.GraphicsPipeline,
 
 draw_indirect_buffer: graphics.Buffer,
@@ -163,11 +173,34 @@ pub fn init(
             .depth_attachment_format = self.depth_image.format,
             .vertex_shader_binary = tri_vert_spv,
             .fragment_shader_binary = tri_frag_spv,
+            .depth_state = .{
+                .write_enabled = false,
+                .test_enabled = true,
+                .compare_op = .greater_or_equal,
+            },
         },
         null,
         ColorPassPushConstants,
     );
-    errdefer self.color_pipeline.deinit();
+    errdefer self.color_pipeline.deinit(allocator);
+
+    self.depth_pipeline = try graphics.GraphicsPipeline.init(
+        self.allocator,
+        .{
+            .color_attachment_formats = &.{},
+            .depth_attachment_format = self.depth_image.format,
+            .vertex_shader_binary = depth_vert_spv,
+            .fragment_shader_binary = depth_frag_spv,
+            .depth_state = .{
+                .write_enabled = true,
+                .test_enabled = true,
+                .compare_op = .greater,
+            },
+        },
+        null,
+        ColorPassPushConstants,
+    );
+    errdefer self.depth_pipeline.deinit(allocator);
 
     self.transforms_buffer = try graphics.Buffer.init(command_count * @sizeOf([4][3]f32), .storage);
     errdefer self.transforms_buffer.deinit();
@@ -187,6 +220,10 @@ pub fn init(
     self.color_pipeline.setDescriptorBuffer(2, 0, self.material_indices_buffer);
     self.color_pipeline.setDescriptorBuffer(3, 0, self.draw_indirect_buffer);
     self.color_pipeline.setDescriptorBuffer(4, 0, self.materials_buffer);
+
+    self.depth_pipeline.setDescriptorBuffer(0, 0, self.vertex_buffer);
+    self.depth_pipeline.setDescriptorBuffer(1, 0, self.transforms_buffer);
+    self.depth_pipeline.setDescriptorBuffer(2, 0, self.draw_indirect_buffer);
 
     self.cull_pipeline.setDescriptorBuffer(0, 0, self.transforms_buffer);
     self.cull_pipeline.setDescriptorBuffer(1, 0, self.mesh_buffer);
@@ -214,7 +251,8 @@ pub fn deinit() void
     defer self.vertex_buffer.deinit();
     defer self.index_buffer.deinit();
     defer self.cull_pipeline.deinit(self.allocator);
-    defer self.color_pipeline.deinit();
+    defer self.depth_pipeline.deinit(self.allocator);
+    defer self.color_pipeline.deinit(self.allocator);
     defer self.meshes.deinit(self.allocator);
     defer self.mesh_lods.deinit(self.allocator);
     defer self.transforms_buffer.deinit();
@@ -260,6 +298,66 @@ fn perspectiveProjection(fovy_degrees: f32, aspect_ratio: f32, znear: f32) zalge
     };
 }
 
+fn vectorLength(p: @Vector(4, f32)) f32
+{
+    return @sqrt(@reduce(.Add, p * p));
+}
+
+fn vectorCross(a: @Vector(3, f32), b: @Vector(3, f32)) @Vector(3, f32)
+{
+    const x1 = a[0];
+    const y1 = a[1];
+    const z1 = a[2];
+
+    const x2 = b[0];
+    const y2 = b[1];
+    const z2 = b[2];
+
+    const result_x = (y1 * z2) - (z1 * y2);
+    const result_y = (z1 * x2) - (x1 * z2);
+    const result_z = (x1 * y2) - (y1 * x2);
+
+    return @Vector(3, f32) { result_x, result_y, result_z };
+}
+
+fn normalizePlane(p: @Vector(4, f32)) @Vector(4, f32) 
+{
+    return p / @splat(4, vectorLength(.{ p[0], p[1], p[2], 0 }));
+}
+
+fn extractPlanesFromProjmat(
+        proj: [4][4]f32,
+        view: [4][4]f32,
+        left: *[4]f32, right: *[4]f32,
+        bottom: *[4]f32, top: *[4]f32,
+        near: *[4]f32, far: *[4]f32) void
+{
+    const mat = zalgebra.Mat4.mul(zalgebra.Mat4 { .data = proj }, zalgebra.Mat4.transpose(.{ .data = view })).data;
+
+    var i: usize = 0;
+
+    i = 3;
+    while (i > 0) : (i -= 1) left[i]   = mat[i][3] + mat[i][0];
+    i = 3;
+    while (i > 0) : (i -= 1) right[i]  = mat[i][3] - mat[i][0];
+    i = 3;
+    while (i > 0) : (i -= 1) bottom[i] = mat[i][3] + mat[i][1];
+    i = 3;
+    while (i > 0) : (i -= 1) top[i]    = mat[i][3] - mat[i][1];
+    i = 3;
+    while (i > 0) : (i -= 1) near[i]   = mat[i][3] + mat[i][2];
+    i = 3;
+    while (i > 0) : (i -= 1) far[i]    = mat[i][3] - mat[i][2];
+}
+
+fn createPlane(p1: @Vector(3, f32), normal: @Vector(3, f32)) [4]f32
+{
+    const normalized_normal = zalgebra.Vec3.norm(.{ .data = normal }).data;
+    const distance = zalgebra.Vec3.dot(.{ .data = normalized_normal }, .{ .data = p1 });
+
+    return .{ normalized_normal[0], normalized_normal[1], normalized_normal[2], distance };
+}
+
 pub fn endRender() !void
 {
     const image_index = self.swapchain.image_index;
@@ -281,74 +379,90 @@ pub fn endRender() !void
         self.material_data_changed = false;
     }
 
+    const aspect_ratio: f32 = @intToFloat(f32, window.getWidth()) / @intToFloat(f32, window.getHeight());  
+    const near_plane: f32 = 0.01;
+    const far_plane: f32 = 1000;
+
+    _ = far_plane;
+
+    const fov: f32 = self.camera.fov;
+    const projection = perspectiveProjection(fov, aspect_ratio, near_plane);
+    const view_projection = projection.mul(
+        zalgebra.lookAt(
+            .{ .data = self.camera.translation }, 
+            .{ .data = self.camera.target }, 
+            .{ .data = .{ 0, -1, 0 } }
+        )
+    );
+
     {
         command_buffer.begin() catch unreachable;
         defer command_buffer.end();
 
-        GraphicsContext.self.vkd.cmdPipelineBarrier2(
-            command_buffer.handle, 
-            &.{
-                .dependency_flags = .{ .by_region_bit = true, },
-                .memory_barrier_count = 0,
-                .p_memory_barriers = undefined,
-                .buffer_memory_barrier_count = 0,
-                .p_buffer_memory_barriers = undefined,
-                .image_memory_barrier_count = 1,
-                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                {
-                    .src_stage_mask = .{ .all_commands_bit = true },
-                    .src_access_mask = .{},
-                    .dst_stage_mask = .{ .color_attachment_output_bit = true },
-                    .dst_access_mask = .{ .color_attachment_write_bit = true },
-                    .old_layout = .@"undefined",
-                    .new_layout = .attachment_optimal,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = image.image,
-                    .subresource_range = .{
-                        .aspect_mask = .{ .color_bit = true },
-                        .base_mip_level = 0,
-                        .level_count = vk.REMAINING_MIP_LEVELS,
-                        .base_array_layer = 0,
-                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                    },
-                }),
-            }
-        );
-
-        GraphicsContext.self.vkd.cmdPipelineBarrier2(
-            command_buffer.handle, 
-            &.{
-                .dependency_flags = .{ .by_region_bit = true, },
-                .memory_barrier_count = 0,
-                .p_memory_barriers = undefined,
-                .buffer_memory_barrier_count = 0,
-                .p_buffer_memory_barriers = undefined,
-                .image_memory_barrier_count = 1,
-                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                {
-                    .src_stage_mask = .{ .all_commands_bit = true },
-                    .src_access_mask = .{},
-                    .dst_stage_mask = .{ .color_attachment_output_bit = true },
-                    .dst_access_mask = .{ .color_attachment_write_bit = true },
-                    .old_layout = .@"undefined",
-                    .new_layout = .attachment_optimal,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = self.depth_image.handle,
-                    .subresource_range = .{
-                        .aspect_mask = .{ .depth_bit = true },
-                        .base_mip_level = 0,
-                        .level_count = vk.REMAINING_MIP_LEVELS,
-                        .base_array_layer = 0,
-                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                    },
-                }),
-            }
-        );
-
-        //Color pass #1
+        //compute pass #1 pre depth cull
         {
+            GraphicsContext.self.vkd.cmdPipelineBarrier2(
+                command_buffer.handle, 
+                &.{
+                    .dependency_flags = .{ .by_region_bit = true, },
+                    .memory_barrier_count = 0,
+                    .p_memory_barriers = undefined,
+                    .buffer_memory_barrier_count = 0,
+                    .p_buffer_memory_barriers = undefined,
+                    .image_memory_barrier_count = 1,
+                    .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+                    {
+                        .src_stage_mask = .{ .all_commands_bit = true },
+                        .src_access_mask = .{},
+                        .dst_stage_mask = .{ .color_attachment_output_bit = true },
+                        .dst_access_mask = .{ .color_attachment_write_bit = true },
+                        .old_layout = .@"undefined",
+                        .new_layout = .attachment_optimal,
+                        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                        .image = image.image,
+                        .subresource_range = .{
+                            .aspect_mask = .{ .color_bit = true },
+                            .base_mip_level = 0,
+                            .level_count = vk.REMAINING_MIP_LEVELS,
+                            .base_array_layer = 0,
+                            .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                        },
+                    }),
+                }
+            );
+
+            GraphicsContext.self.vkd.cmdPipelineBarrier2(
+                command_buffer.handle, 
+                &.{
+                    .dependency_flags = .{ .by_region_bit = true, },
+                    .memory_barrier_count = 0,
+                    .p_memory_barriers = undefined,
+                    .buffer_memory_barrier_count = 0,
+                    .p_buffer_memory_barriers = undefined,
+                    .image_memory_barrier_count = 1,
+                    .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+                    {
+                        .src_stage_mask = .{ .all_commands_bit = true },
+                        .src_access_mask = .{},
+                        .dst_stage_mask = .{ .color_attachment_output_bit = true },
+                        .dst_access_mask = .{ .color_attachment_write_bit = true },
+                        .old_layout = .@"undefined",
+                        .new_layout = .attachment_optimal,
+                        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                        .image = self.depth_image.handle,
+                        .subresource_range = .{
+                            .aspect_mask = .{ .depth_bit = true },
+                            .base_mip_level = 0,
+                            .level_count = vk.REMAINING_MIP_LEVELS,
+                            .base_array_layer = 0,
+                            .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                        },
+                    }),
+                }
+            );
+
             command_buffer.setComputePipeline(self.cull_pipeline);
             
             command_buffer.fillBuffer(self.draw_indirect_count_buffer, 0, @sizeOf(u32), 0);
@@ -379,7 +493,28 @@ pub fn endRender() !void
                 }
             );
 
-            command_buffer.setPushData(DrawCullPushConstants, .{ .draw_count = self.draw_index });
+            var near_face: [4]f32 = .{ 0, 0, 0, 0 };
+            var far_face: [4]f32 = .{ 0, 0, 0, 0 };
+            var right_face: [4]f32 = .{ 0, 0, 0, 0 };
+            var left_face: [4]f32 = .{ 0, 0, 0, 0 };
+            var top_face: [4]f32 = .{ 0, 0, 0, 0 };
+            var bottom_face: [4]f32 = .{ 0, 0, 0, 0 };
+
+            // extractPlanesFromProjmat(view_projection.data, view_projection.data, &left_face, &right_face, &bottom_face, &top_face, &near_face, &far_face);
+
+            const front = @as(@Vector(3, f32), self.camera.target) - @as(@Vector(3, f32), self.camera.translation);
+
+            near_face = createPlane(self.camera.translation + (@splat(3, near_plane) * front), front);
+
+            command_buffer.setPushData(DrawCullPushConstants, .{ 
+                .draw_count = self.draw_index,
+                .near_face = near_face,
+                .far_face = far_face,
+                .right_face = right_face,
+                .left_face = left_face,
+                .top_face = top_face,
+                .bottom_face = bottom_face,
+            });
             command_buffer.computeDispatch(self.draw_index, 1, 1);
 
             GraphicsContext.self.vkd.cmdPipelineBarrier2(
@@ -394,7 +529,7 @@ pub fn endRender() !void
                         .{
                             .src_stage_mask = .{ .compute_shader_bit = true },
                             .src_access_mask = .{ .shader_write_bit = true },
-                            .dst_stage_mask = .{ .draw_indirect_bit = true, .all_graphics_bit = true },
+                            .dst_stage_mask = .{ .draw_indirect_bit = true, .vertex_shader_bit = true }, //vk.PipelineStageFlags2
                             .dst_access_mask = .{ .indirect_command_read_bit = true, .shader_read_bit = true },
                             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -418,74 +553,89 @@ pub fn endRender() !void
                     .p_image_memory_barriers = undefined,
                 }
             );
+        }
 
-            const color_attachment = vk.RenderingAttachmentInfo
-            {
-                .image_view = image.view,
-                .image_layout = .attachment_optimal,
-                .resolve_mode = .{},
-                .resolve_image_view = .null_handle,
-                .resolve_image_layout = .@"undefined",
-                .load_op = .clear,
-                .store_op = .store,
-                .clear_value = .{ 
-                    .color = .{ 
-                        .float_32 = .{ 0, 0, 0, 1 },
-                    },
-                },
-            };
-
-            const depth_attachment = vk.RenderingAttachmentInfo
-            {
-                .image_view = self.depth_image.view,
-                .image_layout = .attachment_optimal,
-                .resolve_mode = .{},
-                .resolve_image_view = .null_handle,
-                .resolve_image_layout = .@"undefined",
-                .load_op = .clear,
-                .store_op = .dont_care,
-                .clear_value = .{ 
-                    .depth_stencil = .{ 
-                        .depth = 0,
-                        .stencil = 1,
-                    },
-                },
-            };
-
-            GraphicsContext.self.vkd.cmdBeginRendering(command_buffer.handle, &.{
-                .flags = .{},
-                .render_area = .{ 
-                    .offset = .{ .x = 0, .y = 0 }, 
-                    .extent = .{ .width = window.getWidth(), .height = window.getHeight() } 
-                },
-                .layer_count = 1,
-                .view_mask = 0,
-                .color_attachment_count = 1,
-                .p_color_attachments = @ptrCast([*]const @TypeOf(color_attachment), &color_attachment),
-                .p_depth_attachment = &depth_attachment,
-                .p_stencil_attachment = null,
-            });
-            defer GraphicsContext.self.vkd.cmdEndRendering(command_buffer.handle);
+        //Depth pass #1
+        {
+            command_buffer.beginRenderPass(
+                0, 
+                0, 
+                window.getWidth(), 
+                window.getHeight(), 
+                &.{},
+                .{
+                    .image = &self.depth_image,
+                    .clear = .{ .depth = 0 },
+                }
+            );
+            defer command_buffer.endRenderPass();
 
             command_buffer.setViewport(0, 0, @intToFloat(f32, window.getWidth()), @intToFloat(f32, window.getHeight()), 0, 1);
             command_buffer.setScissor(0, 0, window.getWidth(), window.getHeight());
+            command_buffer.setGraphicsPipeline(self.depth_pipeline);
+            command_buffer.setIndexBuffer(self.index_buffer, .u32);
+            command_buffer.setPushData(ColorPassPushConstants, .{
+                .view_projection = view_projection.data,
+            });
 
-            const aspect_ratio: f32 = @intToFloat(f32, window.getWidth()) / @intToFloat(f32, window.getHeight());  
-            const near_plane: f32 = 0.01;
-            const far_plane: f32 = 1000;
-
-            _ = far_plane;
-
-            const fov: f32 = self.camera.fov;
-            // const projection = zalgebra.perspective(fov, aspect_ratio, near_plane, far_plane);
-            const projection = perspectiveProjection(fov, aspect_ratio, near_plane);
-            const view_projection = projection.mul(
-                zalgebra.lookAt(
-                    .{ .data = self.camera.translation }, 
-                    .{ .data = self.camera.target }, 
-                    .{ .data = .{ 0, -1, 0 } }
-                )
+            command_buffer.drawIndexedIndirectCount(
+                self.draw_indirect_buffer, 
+                0, 
+                @sizeOf(DrawCommand),
+                self.draw_indirect_count_buffer,
+                0,
+                self.draw_index
             );
+        }
+
+        GraphicsContext.self.vkd.cmdPipelineBarrier2(
+            command_buffer.handle, 
+            &.{
+                .dependency_flags = .{ .by_region_bit = true, },
+                .memory_barrier_count = 1,
+                .p_memory_barriers = &[_]vk.MemoryBarrier2
+                {
+                    .{
+                        .src_stage_mask = vk.PipelineStageFlags2 { .late_fragment_tests_bit = true, },
+                        .src_access_mask = vk.AccessFlags2 { .depth_stencil_attachment_write_bit = true },
+                        .dst_stage_mask = .{ .early_fragment_tests_bit = true,  },
+                        .dst_access_mask = .{ .depth_stencil_attachment_read_bit = true, },
+                    }
+                },
+                .buffer_memory_barrier_count = 0,
+                .p_buffer_memory_barriers = undefined,
+                .image_memory_barrier_count = 0,
+                .p_image_memory_barriers = undefined,
+            }
+        );
+
+        //Color pass #1
+        {
+            var color_image: Image = undefined;
+
+            color_image.view = image.view;
+            color_image.handle = image.image;
+
+            command_buffer.beginRenderPass(
+                0, 
+                0, 
+                window.getWidth(), 
+                window.getHeight(), 
+                &[_]graphics.CommandBuffer.Attachment {
+                    .{
+                        .image = &color_image,
+                        .clear = .{ .color = .{ 0, 0, 0, 1 } }
+                    }
+                }, 
+                .{
+                    .image = &self.depth_image,
+                    .clear = null,
+                }
+            );
+            defer command_buffer.endRenderPass();
+
+            command_buffer.setViewport(0, 0, @intToFloat(f32, window.getWidth()), @intToFloat(f32, window.getHeight()), 0, 1);
+            command_buffer.setScissor(0, 0, window.getWidth(), window.getHeight());
 
             command_buffer.setGraphicsPipeline(self.color_pipeline);
             command_buffer.setIndexBuffer(self.index_buffer, .u32);
@@ -602,8 +752,8 @@ const Mesh = extern struct
     vertex_count: u32,
     lod_offset: u32,
     lod_count: u32,
-    bounding_box_min: [3]f32,
-    bounding_box_max: [3]f32,
+    bounding_box_center: [3]f32,
+    bounding_box_extents: [3]f32,
 };
 
 const MeshLod = extern struct 
@@ -617,8 +767,8 @@ pub const MeshHandle = enum(u32) { _ };
 pub fn createMesh(
     vertices: []const Vertex,
     indices: []const u32,
-    bounding_box_min: [3]f32,
-    bounding_box_max: [3]f32,
+    bounding_box_min: @Vector(3, f32),
+    bounding_box_max: @Vector(3, f32),
 ) !MeshHandle
 {
     const mesh_handle = @intCast(u32, self.meshes.items.len);
@@ -631,13 +781,20 @@ pub fn createMesh(
         .index_count = @intCast(u32, indices.len),
     });
 
+    const bounding_box_center = (bounding_box_max + bounding_box_min) / @splat(3, @as(f32, 2));
+    const bounding_box_extents = @Vector(3, f32) { 
+        bounding_box_max[0] - bounding_box_center[0], 
+        bounding_box_max[1] - bounding_box_center[1], 
+        bounding_box_max[2] - bounding_box_center[2], 
+    };
+
     try self.meshes.append(self.allocator, .{
         .vertex_offset = @intCast(u32, self.vertex_offset / @sizeOf(Vertex)),
         .vertex_count = @intCast(u32, vertices.len),
         .lod_offset  = lod_offset,
         .lod_count = lod_count,
-        .bounding_box_min = bounding_box_min,
-        .bounding_box_max = bounding_box_max,
+        .bounding_box_center = bounding_box_center,
+        .bounding_box_extents = bounding_box_extents,
     });
 
     try self.vertex_buffer.update(Vertex, self.vertex_offset, vertices);

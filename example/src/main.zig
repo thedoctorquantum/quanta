@@ -321,7 +321,7 @@ pub fn main() !void
 
             var i: isize = 0;
 
-            const mesh_square_size = 10;
+            const mesh_square_size = 50;
 
             while (i < mesh_square_size) : (i += 1)
             {
