@@ -135,7 +135,7 @@ pub fn init(
     };
 
     //Could eventually use the dedicated transfer queue if it's available
-    self.transfer_command_buffer = try graphics.CommandBuffer.init(.graphics);
+    self.transfer_command_buffer = try graphics.CommandBuffer.init(.transfer);
     errdefer self.transfer_command_buffer.deinit();
 
     self.image_staging_buffers = .{};
@@ -346,8 +346,8 @@ pub fn beginRender(camera: Camera) !void
                                 .dst_stage_mask = .{},
                                 .old_layout = .transfer_dst_optimal,
                                 .new_layout = self.albedo_images.items[i].layout,
-                                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                                .src_queue_family_index = GraphicsContext.self.transfer_family_index.?,
+                                .dst_queue_family_index = GraphicsContext.self.graphics_family_index.?,
                                 .image = self.albedo_images.items[i].handle,
                                 .subresource_range = .{
                                     .aspect_mask = self.albedo_images.items[i].aspect_mask,

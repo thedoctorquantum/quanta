@@ -130,7 +130,8 @@ pub fn update(self: Buffer, comptime T: type, offset: usize, data: []const T) !v
         const mapped_data = try staging.map(T);
         defer staging.unmap();
 
-        std.mem.copy(T, mapped_data, data);
+        // std.mem.copy(T, mapped_data, data);
+        @memcpy(@ptrCast([*]u8, mapped_data.ptr), @ptrCast([*]const u8, data.ptr), staging.size);
     }
 
     var command_buffer = try CommandBuffer.init(.graphics);

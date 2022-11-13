@@ -14,6 +14,7 @@ pub const Queue = enum
 {
     graphics,
     compute,
+    transfer,
 };
 
 handle: vk.CommandBuffer,
@@ -45,6 +46,7 @@ pub fn init(queue: Queue) !CommandBuffer
     {
         .graphics => Context.self.graphics_command_pool,
         .compute => Context.self.compute_command_pool,  
+        .transfer => Context.self.transfer_command_pool,  
     };
 
     try Context.self.vkd.allocateCommandBuffers(Context.self.device, &.{
@@ -64,6 +66,7 @@ pub fn deinit(self: *CommandBuffer) void
     {
         .graphics => Context.self.graphics_command_pool,
         .compute => Context.self.compute_command_pool,  
+        .transfer => Context.self.transfer_command_pool,  
     };
 
     defer self.wait_fence.deinit();
@@ -101,7 +104,14 @@ pub fn submitAndWait(self: CommandBuffer) !void
 
 pub fn submit(self: CommandBuffer, fence: Fence) !void 
 {
-    try Context.self.vkd.queueSubmit2(Context.self.graphics_queue, 1, &[_]vk.SubmitInfo2
+    const queue = switch (self.queue)
+    {
+        .graphics => Context.self.graphics_queue,
+        .compute => Context.self.compute_queue,
+        .transfer => Context.self.transfer_queue,
+    };
+
+    try Context.self.vkd.queueSubmit2(queue, 1, &[_]vk.SubmitInfo2
     {
         .{
             .flags = .{},
