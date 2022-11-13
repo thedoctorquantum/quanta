@@ -30,6 +30,14 @@ pub fn wait(self: Fence) void
     _ = Context.self.vkd.waitForFences(Context.self.device, 1, @ptrCast([*]const vk.Fence, &self.handle), vk.TRUE, std.math.maxInt(u64)) catch unreachable;
 }
 
+///Returns true if the fence is signaled, otherwise it returns false
+pub fn getStatus(self: Fence) bool 
+{
+    const status = Context.self.vkd.getFenceStatus(Context.self.device, self.handle) catch unreachable;
+
+    return if (status == .success) true else false;
+}
+
 pub fn reset(self: Fence) void 
 {
     Context.self.vkd.resetFences(Context.self.device, 1, @ptrCast([*]const vk.Fence, &self.handle)) catch unreachable;

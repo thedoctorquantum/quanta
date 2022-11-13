@@ -57,7 +57,7 @@ pub fn main() !void
 
     const allocator = if (builtin.mode == .Debug) gpa.allocator() else std.heap.c_allocator;
 
-    try window.init(1920, 1080, "Quanta Example");
+    try window.init(1600, 900, "Quanta Example");
     defer window.deinit();
 
     const pipeline_cache_file_path = "pipeline_cache";

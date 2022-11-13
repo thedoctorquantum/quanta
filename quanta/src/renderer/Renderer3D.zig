@@ -52,6 +52,11 @@ depth_image: graphics.Image,
 command_buffers: []graphics.CommandBuffer, 
 frame_fence: graphics.Fence,
 
+transfer_command_buffer: graphics.CommandBuffer,
+
+image_staging_buffers: std.ArrayListUnmanaged(graphics.Buffer),
+image_staging_fence: graphics.Fence,
+
 vertex_position_buffer: graphics.Buffer,
 vertex_position_offset: usize,
 vertex_buffer: graphics.Buffer,
@@ -126,6 +131,14 @@ pub fn init(
     {
         command_buffer.deinit();
     };
+
+    //Could eventually use the dedicated transfer queue if it's available
+    self.transfer_command_buffer = try graphics.CommandBuffer.init(.graphics);
+    errdefer self.transfer_command_buffer.deinit();
+
+    self.image_staging_buffers = .{};
+    self.image_staging_fence = try graphics.Fence.init();
+    errdefer self.image_staging_fence.deinit();
 
     self.frame_fence = try graphics.Fence.init();
     errdefer self.frame_fence.deinit();
@@ -249,6 +262,9 @@ pub fn deinit() void
     {
         command_buffer.deinit();
     };
+    defer self.image_staging_buffers.deinit(self.allocator);
+    defer self.transfer_command_buffer.deinit();
+    defer self.image_staging_fence.deinit();
     defer self.frame_fence.deinit();
     defer self.draw_indirect_buffer.deinit();
     defer self.draw_indirect_count_buffer.deinit();
@@ -373,6 +389,37 @@ pub fn endRender() void
 
 fn endRenderInternal() !void
 {
+    if (self.image_staging_fence.getStatus() == false)
+    {
+        if (self.material_data_changed)
+        {
+            {
+                try self.materials_buffer.update(Material, 0, self.materials.items);
+
+                try self.transfer_command_buffer.begin();
+                defer self.transfer_command_buffer.end(); 
+
+                for (self.image_staging_buffers.items) |staging_buffer, i|
+                {
+                    self.transfer_command_buffer.copyBufferToImage(staging_buffer, self.albedo_images.items[i]);
+                }       
+            }
+
+            self.image_staging_fence.reset();
+            try self.transfer_command_buffer.submit(self.image_staging_fence);
+
+            self.material_data_changed = false;
+        }
+
+        return;
+    }
+
+    for (self.image_staging_buffers.items) |*staging_buffer|
+    {
+        staging_buffer.deinit();
+    }
+    self.image_staging_buffers.clearRetainingCapacity();
+
     const image_index = self.swapchain.image_index;
     const image = self.swapchain.swap_images[image_index];
     const command_buffer = &self.command_buffers[image_index];
@@ -383,13 +430,6 @@ fn endRenderInternal() !void
         try self.mesh_lod_buffer.update(MeshLod, 0, self.mesh_lods.items);
 
         self.mesh_data_changed = false;
-    }
-
-    if (self.material_data_changed)
-    {
-        try self.materials_buffer.update(Material, 0, self.materials.items);
-
-        self.material_data_changed = false;
     }
 
     const aspect_ratio: f32 = @intToFloat(f32, window.getWidth()) / @intToFloat(f32, window.getHeight());  
@@ -865,17 +905,30 @@ pub fn createMaterial(
 {
     const material_handle = @intCast(u32, self.materials.items.len);
 
-    var albedo_image = try Image.initData(
-        albedo_texture_data, 
-        albedo_texture_width, 
-        albedo_texture_height, 
-        1, 
-        .r8g8b8a8_srgb, 
-        vk.ImageLayout.shader_read_only_optimal
-    );
+    // var albedo_image = try Image.initData(
+    //     albedo_texture_data, 
+    //     albedo_texture_width, 
+    //     albedo_texture_height, 
+    //     1, 
+    //     .r8g8b8a8_srgb, 
+    //     vk.ImageLayout.shader_read_only_optimal
+    // );
+    var albedo_image = try Image.init(albedo_texture_width, albedo_texture_height, 1, .r8g8b8a8_srgb, .shader_read_only_optimal);
     errdefer albedo_image.deinit();
 
     try self.albedo_images.append(self.allocator, albedo_image);
+
+    var albedo_staging_buffer = try graphics.Buffer.init(albedo_texture_data.len, .staging); 
+    errdefer albedo_staging_buffer.deinit();
+
+    {
+        const mapped_data = try albedo_staging_buffer.map(u8);
+        defer albedo_staging_buffer.unmap();
+
+        std.mem.copy(u8, mapped_data, albedo_texture_data);
+    }
+
+    try self.image_staging_buffers.append(self.allocator, albedo_staging_buffer);
 
     var albedo_sampler = try Sampler.init();
     errdefer albedo_sampler.deinit();

@@ -7,6 +7,7 @@ const ComputePipeline = @import("ComputePipeline.zig");
 const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const Buffer = @import("Buffer.zig");
 const Image = @import("Image.zig");
+const Fence = @import("Fence.zig");
 
 pub const Queue = enum 
 {
@@ -17,7 +18,7 @@ pub const Queue = enum
 handle: vk.CommandBuffer,
 queue: Queue,
 pipeline_layout: vk.PipelineLayout,
-wait_fence: vk.Fence, 
+wait_fence: Fence, 
 local_size_x: u32,
 local_size_y: u32,
 local_size_z: u32,
@@ -29,21 +30,21 @@ pub fn init(queue: Queue) !CommandBuffer
         .handle = .null_handle,
         .queue = queue,
         .pipeline_layout = .null_handle,
-        .wait_fence = .null_handle,
+        .wait_fence = undefined,
         .local_size_x = 0,
         .local_size_y = 0,
         .local_size_z = 0,
         .is_graphics_pipeline = false,
     };
 
+    self.wait_fence = try Fence.init();
+    errdefer self.wait_fence.deinit();
+
     const pool = switch (self.queue)
     {
         .graphics => Context.self.graphics_command_pool,
         .compute => Context.self.compute_command_pool,  
     };
-
-    self.wait_fence = try Context.self.vkd.createFence(Context.self.device, &.{ .flags = .{ .signaled_bit = false, } }, &Context.self.allocation_callbacks);
-    errdefer Context.self.vkd.destroyFence(Context.self.device, self.wait_fence, &Context.self.allocation_callbacks);
 
     try Context.self.vkd.allocateCommandBuffers(Context.self.device, &.{
         .command_pool = pool,
@@ -64,7 +65,7 @@ pub fn deinit(self: *CommandBuffer) void
         .compute => Context.self.compute_command_pool,  
     };
 
-    defer Context.self.vkd.destroyFence(Context.self.device, self.wait_fence, &Context.self.allocation_callbacks);
+    defer self.wait_fence.deinit();
     defer Context.self.vkd.freeCommandBuffers(Context.self.device, pool, 1, @ptrCast([*]vk.CommandBuffer, &self.handle));
 }
 
@@ -86,6 +87,13 @@ pub fn end(self: CommandBuffer) void
 
 pub fn submitAndWait(self: CommandBuffer) !void 
 {
+    try self.submit(self.wait_fence);
+    self.wait_fence.wait();
+    self.wait_fence.reset();
+}
+
+pub fn submit(self: CommandBuffer, fence: Fence) !void 
+{
     try Context.self.vkd.queueSubmit2(Context.self.graphics_queue, 1, &[_]vk.SubmitInfo2
     {
         .{
@@ -102,10 +110,7 @@ pub fn submitAndWait(self: CommandBuffer) !void
             .signal_semaphore_info_count = 0,
             .p_signal_semaphore_infos = undefined,
         }
-    }, self.wait_fence);
-
-    _ = try Context.self.vkd.waitForFences(Context.self.device, 1, @ptrCast([*]const vk.Fence, &self.wait_fence), vk.TRUE, std.math.maxInt(u64));
-    try Context.self.vkd.resetFences(Context.self.device, 1, @ptrCast([*]const vk.Fence, &self.wait_fence));
+    }, fence.handle);
 }
 
 pub const Attachment = struct 
@@ -323,6 +328,42 @@ pub fn copyBufferToImage(self: CommandBuffer, source: Buffer, destination: Image
             }
         },
     });
+
+    //We may want to give the caller control over this barrier 
+    Context.self.vkd.cmdPipelineBarrier2(
+            self.handle, 
+            &.{
+                .dependency_flags = .{ .by_region_bit = true, },
+                .memory_barrier_count = 0,
+                .p_memory_barriers = undefined,
+                .buffer_memory_barrier_count = 0,
+                .p_buffer_memory_barriers = undefined,
+                .image_memory_barrier_count = 1,
+                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+                {
+                    .src_stage_mask = .{
+                        .copy_bit = true,
+                    },
+                    .dst_access_mask = .{},
+                    .dst_stage_mask = .{},
+                    .src_access_mask = .{
+                        .transfer_write_bit = true,
+                    },
+                    .old_layout = .transfer_dst_optimal,
+                    .new_layout = destination.layout,
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .image = destination.handle,
+                    .subresource_range = .{
+                        .aspect_mask = destination.aspect_mask,
+                        .base_mip_level = 0,
+                        .level_count = vk.REMAINING_MIP_LEVELS,
+                        .base_array_layer = 0,
+                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                    },
+                }),
+            }
+        );
 }
 
 pub fn draw(

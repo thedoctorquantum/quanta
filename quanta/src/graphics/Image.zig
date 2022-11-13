@@ -47,41 +47,6 @@ pub fn initData(
 
         command_buffer.copyBufferToImage(source_buffer, image);
 
-        Context.self.vkd.cmdPipelineBarrier2(
-            command_buffer.handle, 
-            &.{
-                .dependency_flags = .{ .by_region_bit = true, },
-                .memory_barrier_count = 0,
-                .p_memory_barriers = undefined,
-                .buffer_memory_barrier_count = 0,
-                .p_buffer_memory_barriers = undefined,
-                .image_memory_barrier_count = 1,
-                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                {
-                    .src_stage_mask = .{
-                        .copy_bit = true,
-                    },
-                    .src_access_mask = .{
-                        .transfer_write_bit = true,
-                    },
-                    .dst_stage_mask = .{},
-                    .dst_access_mask = .{},
-                    .old_layout = .transfer_dst_optimal,
-                    .new_layout = image.layout,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = image.handle,
-                    .subresource_range = .{
-                        .aspect_mask = image.aspect_mask,
-                        .base_mip_level = 0,
-                        .level_count = vk.REMAINING_MIP_LEVELS,
-                        .base_array_layer = 0,
-                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                    },
-                }),
-            }
-        );
-
         command_buffer.end();
 
         try command_buffer.submitAndWait();

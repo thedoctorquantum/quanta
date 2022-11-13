@@ -118,6 +118,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdPushDescriptorSetKHR = true,
     .cmdDrawIndexedIndirect = true,
     .cmdDrawIndexedIndirectCount = true,
+    .getFenceStatus = true,
 });
 
 var vkGetInstanceProcAddr: vk.PfnGetInstanceProcAddr = undefined;

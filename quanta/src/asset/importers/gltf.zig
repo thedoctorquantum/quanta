@@ -422,6 +422,7 @@ const ImportBinTexture = packed struct
     height: u32,
 };
 
+///Platform specific runtime binary format
 ///Note that the binary format is not necessarily stable or backwards compatible
 ///Use runtime imports for modding purposes
 pub fn encode(allocator: std.mem.Allocator, import_data: Import) ![]const u8
