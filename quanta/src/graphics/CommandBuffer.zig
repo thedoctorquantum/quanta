@@ -8,6 +8,7 @@ const GraphicsPipeline = @import("GraphicsPipeline.zig");
 const Buffer = @import("Buffer.zig");
 const Image = @import("Image.zig");
 const Fence = @import("Fence.zig");
+const Event = @import("Event.zig");
 
 pub const Queue = enum 
 {
@@ -83,6 +84,12 @@ pub fn begin(self: CommandBuffer) !void
 pub fn end(self: CommandBuffer) void 
 {
     Context.self.vkd.endCommandBuffer(self.handle) catch unreachable;
+}
+
+///Places an event which signals when the previous commands are finished executing
+pub fn setEvent(self: CommandBuffer, event: Event) void 
+{
+    Context.self.vkd.cmdSetEvent(self.handle, event.handle, .{ .top_of_pipe_bit = true });
 }
 
 pub fn submitAndWait(self: CommandBuffer) !void 
@@ -329,41 +336,41 @@ pub fn copyBufferToImage(self: CommandBuffer, source: Buffer, destination: Image
         },
     });
 
-    //We may want to give the caller control over this barrier 
-    Context.self.vkd.cmdPipelineBarrier2(
-            self.handle, 
-            &.{
-                .dependency_flags = .{ .by_region_bit = true, },
-                .memory_barrier_count = 0,
-                .p_memory_barriers = undefined,
-                .buffer_memory_barrier_count = 0,
-                .p_buffer_memory_barriers = undefined,
-                .image_memory_barrier_count = 1,
-                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                {
-                    .src_stage_mask = .{
-                        .copy_bit = true,
-                    },
-                    .dst_access_mask = .{},
-                    .dst_stage_mask = .{},
-                    .src_access_mask = .{
-                        .transfer_write_bit = true,
-                    },
-                    .old_layout = .transfer_dst_optimal,
-                    .new_layout = destination.layout,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = destination.handle,
-                    .subresource_range = .{
-                        .aspect_mask = destination.aspect_mask,
-                        .base_mip_level = 0,
-                        .level_count = vk.REMAINING_MIP_LEVELS,
-                        .base_array_layer = 0,
-                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                    },
-                }),
-            }
-        );
+    // //We may want to give the caller control over this barrier 
+    // Context.self.vkd.cmdPipelineBarrier2(
+    //     self.handle, 
+    //     &.{
+    //         .dependency_flags = .{ .by_region_bit = true, },
+    //         .memory_barrier_count = 0,
+    //         .p_memory_barriers = undefined,
+    //         .buffer_memory_barrier_count = 0,
+    //         .p_buffer_memory_barriers = undefined,
+    //         .image_memory_barrier_count = 1,
+    //         .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+    //         {
+    //             .src_stage_mask = .{
+    //                 .copy_bit = true,
+    //             },
+    //             .dst_access_mask = .{},
+    //             .dst_stage_mask = .{},
+    //             .src_access_mask = .{
+    //                 .transfer_write_bit = true,
+    //             },
+    //             .old_layout = .transfer_dst_optimal,
+    //             .new_layout = destination.layout,
+    //             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+    //             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+    //             .image = destination.handle,
+    //             .subresource_range = .{
+    //                 .aspect_mask = destination.aspect_mask,
+    //                 .base_mip_level = 0,
+    //                 .level_count = vk.REMAINING_MIP_LEVELS,
+    //                 .base_array_layer = 0,
+    //                 .layer_count = vk.REMAINING_ARRAY_LAYERS,
+    //             },
+    //         }),
+    //     }
+    // );
 }
 
 pub fn draw(

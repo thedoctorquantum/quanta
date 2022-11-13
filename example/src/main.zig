@@ -97,11 +97,11 @@ pub fn main() !void
     try Renderer3D.init(allocator, &swapchain);
     defer Renderer3D.deinit();
 
-    const tileset_import = try png.import(allocator, @embedFile("assets/tileset.png"));
-    defer allocator.free(tileset_import.data);
+    // const tileset_import = try png.import(allocator, @embedFile("assets/tileset.png"));
+    // defer allocator.free(tileset_import.data);
 
-    const wood_floor_import = try png.import(allocator, @embedFile("assets/wood_floor.png"));
-    defer allocator.free(wood_floor_import.data);
+    // const wood_floor_import = try png.import(allocator, @embedFile("assets/wood_floor.png"));
+    // defer allocator.free(wood_floor_import.data);
 
     const test_scene_import_blob_file = try std.fs.cwd().openFile("zig-out/bin/assets/Suzanne", .{});
     defer test_scene_import_blob_file.close();
@@ -114,6 +114,9 @@ pub fn main() !void
 
     const test_scene_meshes = try allocator.alloc(Renderer3D.MeshHandle, test_scene_import.sub_meshes.len);
     defer allocator.free(test_scene_meshes);
+
+    const test_scene_materials_by_texture = try allocator.alloc(Renderer3D.MaterialHandle, test_scene_import.textures.len);
+    defer allocator.free(test_scene_materials_by_texture);
 
     const test_scene_materials = try allocator.alloc(Renderer3D.MaterialHandle, test_scene_import.materials.len);
     defer allocator.free(test_scene_materials);
@@ -129,16 +132,19 @@ pub fn main() !void
         );
     }
 
-    for (test_scene_import.materials) |material, i|
+    for (test_scene_import.textures) |texture, i|
     {
-        const texture = &test_scene_import.textures[material.albedo_texture_index];
-
-        test_scene_materials[i] = try Renderer3D.createMaterial(
+        test_scene_materials_by_texture[i] = try Renderer3D.createMaterial(
             texture.data,
             texture.width, 
             texture.height, 
             .{ 1, 1, 1, 1 },
         );
+    }
+
+    for (test_scene_import.materials) |material, i|
+    {
+        test_scene_materials[i] = test_scene_materials_by_texture[material.albedo_texture_index];
     }
 
     const triangle_mesh = try Renderer3D.createMesh(
@@ -171,6 +177,8 @@ pub fn main() !void
         .{ 0, 0, 0 },
     );
 
+    _ = triangle_mesh;
+
     const second_mesh = try Renderer3D.createMesh(
         &[_][3]f32 
         {
@@ -201,19 +209,21 @@ pub fn main() !void
         .{ 0, 0, 0 },
     );
 
-    const material2 = try Renderer3D.createMaterial(
-        wood_floor_import.data, 
-        wood_floor_import.width, 
-        wood_floor_import.height, 
-        .{ 1, 0.4, 0.4, 1 }
-    );
+    _ = second_mesh;
 
-    const material = try Renderer3D.createMaterial(
-        tileset_import.data, 
-        tileset_import.width, 
-        tileset_import.height, 
-        .{ 1, 1, 1, 1 }
-    );
+    // const material2 = try Renderer3D.createMaterial(
+    //     wood_floor_import.data, 
+    //     wood_floor_import.width, 
+    //     wood_floor_import.height, 
+    //     .{ 1, 0.4, 0.4, 1 }
+    // );
+
+    // const material = try Renderer3D.createMaterial(
+    //     tileset_import.data, 
+    //     tileset_import.width, 
+    //     tileset_import.height, 
+    //     .{ 1, 1, 1, 1 }
+    // );
 
     const time_start = std.time.milliTimestamp();
 
@@ -228,11 +238,11 @@ pub fn main() !void
         .fov = 60,
     };
 
-    var camera_position = @Vector(3, f32) { 6, 3, 6 };
-    var camera_front = @Vector(3, f32) { 0, -1, -1 };
+    var camera_position = @Vector(3, f32) { 8.7, 5.7, 0.9 };
+    var camera_front = @Vector(3, f32) { -0.9, -0.1, -0.2 };
     var camera_up = @Vector(3, f32) { 0, 1, 0 };
-    var yaw: f32 = 0;
-    var pitch: f32 = 0;
+    var yaw: f32 = 168.1;
+    var pitch: f32 = -9.1;
 
     var last_mouse_x: f32 = 0;
     var last_mouse_y: f32 = 0;
@@ -255,6 +265,8 @@ pub fn main() !void
         }
 
         const time = std.time.milliTimestamp() - time_start;
+
+        _ = time;
 
         if (!camera_enable_changed and window.window.getKey(.tab) == .press)
         {
@@ -333,7 +345,7 @@ pub fn main() !void
 
         //draw
         {
-            Renderer3D.beginRender(camera);
+            try Renderer3D.beginRender(camera);
             defer Renderer3D.endRender();
 
             for (test_scene_import.sub_meshes) |sub_mesh, i|
@@ -341,7 +353,7 @@ pub fn main() !void
                 Renderer3D.drawMesh(test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
             }
 
-            const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
+            // const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
 
             if (false)
             {
@@ -355,26 +367,26 @@ pub fn main() !void
 
                     while (j < mesh_square_size) : (j += 1)
                     {
-                            Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else triangle_mesh, if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
-                            .{  
-                                .data = .{ 5 + @intToFloat(f32, -1 * i * 10), 0.5 + y_offset + @intToFloat(f32, (i + j * mesh_square_size)) / 100, @intToFloat(f32, -1 * j * 10) }
-                            }
-                        ));
+                            // Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else triangle_mesh, if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
+                            // .{  
+                                // .data = .{ 5 + @intToFloat(f32, -1 * i * 10), 0.5 + y_offset + @intToFloat(f32, (i + j * mesh_square_size)) / 100, @intToFloat(f32, -1 * j * 10) }
+                            // }
+                        // ));
                     }
                 }
 
-                Renderer3D.drawMesh(triangle_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
-                    .{  
-                        .data = .{ 0, y_offset, 0 }
-                    }
-                ));
+                // Renderer3D.drawMesh(triangle_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
+                    // .{  
+                        // .data = .{ 0, y_offset, 0 }
+                    // }
+                // ));
 
-                Renderer3D.drawMesh(second_mesh, material2, quanta.math.zalgebra.Mat4.fromRotation(
-                    y_offset * 60,
-                    .{  
-                        .data = .{ 1, 0, 0 }
-                    }
-                ));
+                // Renderer3D.drawMesh(second_mesh, material2, quanta.math.zalgebra.Mat4.fromRotation(
+                    // y_offset * 60,
+                    // .{  
+                        // .data = .{ 1, 0, 0 }
+                    // }
+                // ));
             }
         }
     }

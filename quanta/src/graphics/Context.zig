@@ -118,6 +118,11 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdPushDescriptorSetKHR = true,
     .cmdDrawIndexedIndirect = true,
     .cmdDrawIndexedIndirectCount = true,
+    .cmdSetEvent = true,
+    .cmdSetEvent2 = true,
+    .getEventStatus = true,
+    .createEvent = true,
+    .destroyEvent = true,
     .getFenceStatus = true,
 });
 

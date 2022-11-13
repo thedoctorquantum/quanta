@@ -53,6 +53,7 @@ command_buffers: []graphics.CommandBuffer,
 frame_fence: graphics.Fence,
 
 transfer_command_buffer: graphics.CommandBuffer,
+image_transfer_events: std.ArrayListUnmanaged(graphics.Event),
 
 image_staging_buffers: std.ArrayListUnmanaged(graphics.Buffer),
 image_staging_fence: graphics.Fence,
@@ -111,6 +112,7 @@ pub fn init(
     self.vertex_position_offset = 0;
     self.mesh_data_changed = false;
     self.material_data_changed = false;
+    self.image_transfer_events = .{}; 
 
     self.depth_image = try Image.init(window.getWidth(), window.getHeight(), 1, vk.Format.d32_sfloat, vk.ImageLayout.attachment_optimal);
     errdefer self.depth_image.deinit();
@@ -266,6 +268,7 @@ pub fn deinit() void
     defer self.transfer_command_buffer.deinit();
     defer self.image_staging_fence.deinit();
     defer self.frame_fence.deinit();
+    defer self.image_transfer_events.deinit(self.allocator);
     defer self.draw_indirect_buffer.deinit();
     defer self.draw_indirect_count_buffer.deinit();
     defer self.input_draw_buffer.deinit();
@@ -302,10 +305,69 @@ pub const Camera = struct
     fov: f32,
 };
 
-pub fn beginRender(camera: Camera) void 
+pub fn beginRender(camera: Camera) !void 
 {
     self.draw_index = 0;
     self.camera = camera;
+
+    if (self.material_data_changed)
+    {
+        {
+            try self.materials_buffer.update(Material, 0, self.materials.items);
+
+            try self.transfer_command_buffer.begin();
+            defer self.transfer_command_buffer.end(); 
+
+            for (self.image_staging_buffers.items) |staging_buffer, i|
+            {
+                self.transfer_command_buffer.copyBufferToImage(staging_buffer, self.albedo_images.items[i]);
+                // self.transfer_command_buffer.setEvent(self.image_transfer_events.items[i]);
+
+                GraphicsContext.self.vkd.cmdSetEvent2(
+                    self.transfer_command_buffer.handle, 
+                    self.image_transfer_events.items[i].handle, 
+                    &.{
+                        .dependency_flags = .{},
+                        .memory_barrier_count = 0,
+                        .p_memory_barriers = undefined,
+                        .buffer_memory_barrier_count = 0,
+                        .p_buffer_memory_barriers = undefined,
+                        .image_memory_barrier_count = 1,
+                        .p_image_memory_barriers = &[_]vk.ImageMemoryBarrier2 
+                        {
+                            .{
+                                .src_stage_mask = .{
+                                    .copy_bit = true,
+                                },
+                                .src_access_mask = .{
+                                    .transfer_write_bit = true,
+                                },
+                                .dst_access_mask = .{},
+                                .dst_stage_mask = .{},
+                                .old_layout = .transfer_dst_optimal,
+                                .new_layout = self.albedo_images.items[i].layout,
+                                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                                .image = self.albedo_images.items[i].handle,
+                                .subresource_range = .{
+                                    .aspect_mask = self.albedo_images.items[i].aspect_mask,
+                                    .base_mip_level = 0,
+                                    .level_count = vk.REMAINING_MIP_LEVELS,
+                                    .base_array_layer = 0,
+                                    .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                                },
+                            }
+                        },
+                    }
+                );
+            }       
+        }
+
+        self.image_staging_fence.reset();
+        try self.transfer_command_buffer.submit(self.image_staging_fence);
+
+        self.material_data_changed = false;
+    }
 }
 
 fn perspectiveProjection(fovy_degrees: f32, aspect_ratio: f32, znear: f32) zalgebra.Mat4 
@@ -389,36 +451,22 @@ pub fn endRender() void
 
 fn endRenderInternal() !void
 {
-    if (self.image_staging_fence.getStatus() == false)
+    if (self.image_staging_fence.getStatus() == true)
     {
-        if (self.material_data_changed)
+        self.material_data_changed = false;
+
+        for (self.image_staging_buffers.items) |*staging_buffer|
         {
-            {
-                try self.materials_buffer.update(Material, 0, self.materials.items);
-
-                try self.transfer_command_buffer.begin();
-                defer self.transfer_command_buffer.end(); 
-
-                for (self.image_staging_buffers.items) |staging_buffer, i|
-                {
-                    self.transfer_command_buffer.copyBufferToImage(staging_buffer, self.albedo_images.items[i]);
-                }       
-            }
-
-            self.image_staging_fence.reset();
-            try self.transfer_command_buffer.submit(self.image_staging_fence);
-
-            self.material_data_changed = false;
+            staging_buffer.deinit();
         }
+        self.image_staging_buffers.clearRetainingCapacity();
 
-        return;
+        for (self.image_transfer_events.items) |*event|
+        {
+            event.deinit();
+        }
+        self.image_transfer_events.clearRetainingCapacity();
     }
-
-    for (self.image_staging_buffers.items) |*staging_buffer|
-    {
-        staging_buffer.deinit();
-    }
-    self.image_staging_buffers.clearRetainingCapacity();
 
     const image_index = self.swapchain.image_index;
     const image = self.swapchain.swap_images[image_index];
@@ -905,14 +953,6 @@ pub fn createMaterial(
 {
     const material_handle = @intCast(u32, self.materials.items.len);
 
-    // var albedo_image = try Image.initData(
-    //     albedo_texture_data, 
-    //     albedo_texture_width, 
-    //     albedo_texture_height, 
-    //     1, 
-    //     .r8g8b8a8_srgb, 
-    //     vk.ImageLayout.shader_read_only_optimal
-    // );
     var albedo_image = try Image.init(albedo_texture_width, albedo_texture_height, 1, .r8g8b8a8_srgb, .shader_read_only_optimal);
     errdefer albedo_image.deinit();
 
@@ -925,9 +965,13 @@ pub fn createMaterial(
         const mapped_data = try albedo_staging_buffer.map(u8);
         defer albedo_staging_buffer.unmap();
 
-        std.mem.copy(u8, mapped_data, albedo_texture_data);
+        @memcpy(mapped_data.ptr, albedo_texture_data.ptr, albedo_texture_data.len);
     }
 
+    var albedo_transfer_event = try graphics.Event.init();
+    errdefer albedo_transfer_event.deinit();
+
+    try self.image_transfer_events.append(self.allocator, albedo_transfer_event);
     try self.image_staging_buffers.append(self.allocator, albedo_staging_buffer);
 
     var albedo_sampler = try Sampler.init();
@@ -962,6 +1006,19 @@ pub fn drawMesh(
     transform: zalgebra.Mat4x4(f32),
 ) void 
 {
+    //Should really check if the transfer command buffer is pending
+    if (self.image_staging_fence.getStatus() == false)
+    {
+        const material_data = self.materials.items[@enumToInt(material)];
+        const event: graphics.Event = self.image_transfer_events.items[material_data.albedo_texture_index];
+
+        //If the texture is still being transfered by the transfer hardware, don't draw
+        if (event.getStatus() == false)
+        {
+            return;
+        }
+    }
+
     self.input_draws[self.draw_index] = .{
         .mesh_index = @enumToInt(mesh),
     };
