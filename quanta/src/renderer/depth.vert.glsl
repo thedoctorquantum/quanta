@@ -9,17 +9,9 @@ layout(push_constant) uniform Constants
     mat4 view_projection;
 } constants;
 
-struct Vertex 
+layout(set = 0, binding = 0, scalar) restrict readonly buffer VertexPositions
 {
-    vec3 position;
-    vec3 normal;
-    uint color;
-    vec2 uv;
-};
-
-layout(set = 0, binding = 0, scalar) restrict readonly buffer Vertices
-{
-    Vertex vertices[];
+    vec3 vertex_positions[];
 };
 
 layout(set = 0, binding = 1, scalar) restrict readonly buffer Transforms
@@ -46,8 +38,8 @@ void main()
 {
     uint instance_index = draw_commands[gl_DrawIDARB].instance_index;
     
-    Vertex vertex = vertices[gl_VertexIndex]; 
+    vec3 vertex_position = vertex_positions[gl_VertexIndex]; 
     mat4 transform = mat4(transforms[instance_index]);
 
-    gl_Position = constants.view_projection * transform * vec4(vertex.position, 1.0);
+    gl_Position = constants.view_projection * transform * vec4(vertex_position, 1.0);
 }

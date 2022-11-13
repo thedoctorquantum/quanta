@@ -11,23 +11,27 @@ layout(push_constant) uniform Constants
 
 struct Vertex 
 {
-    vec3 position;
     vec3 normal;
     uint color;
     vec2 uv;
 };
 
-layout(set = 0, binding = 0, scalar) restrict readonly buffer Vertices
+layout(set = 0, binding = 0, scalar) restrict readonly buffer VertexPositions
+{
+    vec3 vertex_positions[];
+};
+
+layout(set = 0, binding = 1, scalar) restrict readonly buffer Vertices
 {
     Vertex vertices[];
 };
 
-layout(set = 0, binding = 1, scalar) restrict readonly buffer Transforms
+layout(set = 0, binding = 2, scalar) restrict readonly buffer Transforms
 {
     mat4x3 transforms[];
 };
 
-layout(set = 0, binding = 2, scalar) restrict readonly buffer MaterialIndicies
+layout(set = 0, binding = 3, scalar) restrict readonly buffer MaterialIndicies
 {
     uint material_indices[];
 };
@@ -42,7 +46,7 @@ struct DrawIndexedIndirectCommand
     u32 instance_index;
 };
 
-layout(set = 0, binding = 3, scalar) restrict readonly buffer DrawCommands
+layout(set = 0, binding = 4, scalar) restrict readonly buffer DrawCommands
 {
     DrawIndexedIndirectCommand draw_commands[];
 };
@@ -50,6 +54,7 @@ layout(set = 0, binding = 3, scalar) restrict readonly buffer DrawCommands
 layout(location = 0) out Out
 {
     flat uint material_index;
+    flat uint primitive_index;
     vec4 color;
     vec2 uv;
 } out_data;
@@ -64,6 +69,7 @@ void main()
     out_data.color = unpackUnorm4x8(vertex.color);
     out_data.uv = vertex.uv;
     out_data.material_index = material_indices[instance_index]; 
+    out_data.primitive_index = gl_VertexIndex / 3; 
 
-    gl_Position = constants.view_projection * transform * vec4(vertex.position, 1.0);
+    gl_Position = constants.view_projection * transform * vec4(vertex_positions[gl_VertexIndex], 1.0);
 }

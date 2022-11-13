@@ -2,15 +2,18 @@ const std = @import("std");
 const Renderer3D = @import("../../renderer/Renderer3D.zig");
 const cgltf = @import("cgltf.zig");
 const zalgebra = @import("zalgebra");
+const png = @import("png.zig");
 
 pub const Import = struct 
 {
+    vertex_positions: [][3]f32,
     vertices: []Renderer3D.Vertex,
     indices: []u32,
     sub_meshes: []SubMesh,
     materials: []Material,
+    textures: []Texture,
 
-    pub const SubMesh = struct 
+    pub const SubMesh = extern struct 
     {
         vertex_offset: u32,
         vertex_count: u32,
@@ -22,22 +25,37 @@ pub const Import = struct
         bounding_max: [3]f32,
     };
 
-    pub const Material = struct 
+    pub const Material = extern struct 
     {
         albedo: [4]f32,
+        albedo_texture_index: u32, 
+    };
+
+    pub const Texture = struct 
+    {
+        data: []u8,
+        width: u32,
+        height: u32,
     };
 };
 
 pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import 
 {
     var import_data: Import = .{
+        .vertex_positions = &.{},
         .vertices = &.{},
         .indices = &.{},
         .sub_meshes = &.{},
         .materials = &.{},
+        .textures = &.{},
     };
 
     var cgltf_data: [*c]cgltf.cgltf_data = null;
+
+    const file_directory_name = std.fs.path.dirname(file_path) orelse unreachable;
+
+    var file_directory = try std.fs.cwd().openDir(file_directory_name, .{});
+    defer file_directory.close();
 
     const file_extension = std.fs.path.extension(file_path);
 
@@ -115,8 +133,13 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
         else => unreachable,
     }
 
+    const texture_count: usize = cgltf_data.*.textures_count;
+
     var model_vertices = std.ArrayList(Renderer3D.Vertex).init(allocator);
     defer model_vertices.deinit();
+
+    var model_vertex_positions = std.ArrayList([3]f32).init(allocator);
+    defer model_vertex_positions.deinit();
 
     var model_indices = std.ArrayList(u32).init(allocator);
     defer model_indices.deinit();
@@ -124,13 +147,46 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
     var sub_meshes = std.ArrayList(Import.SubMesh).init(allocator);
     defer sub_meshes.deinit();
 
+    var textures = try std.ArrayList(Import.Texture).initCapacity(allocator, texture_count);
+    defer textures.deinit();
+
     var materials = std.ArrayList(Import.Material).init(allocator);
     defer materials.deinit();
 
     std.log.info("scene_count: {}", .{ cgltf_data.*.scenes_count });
     std.log.info("node_count: {}", .{ cgltf_data.*.nodes_count });
+    std.log.info("texture_count: {}", .{ texture_count });
 
     std.debug.assert(cgltf_data.*.scene != null);
+
+    const gltf_images = if (cgltf_data.*.images == null) &[_]cgltf.cgltf_image {} else cgltf_data.*.images[0..cgltf_data.*.images_count];
+
+    std.log.info("gltf_images.len = {}", .{ gltf_images.len });
+
+    //beware image count and texture count may not be the same 
+    for (gltf_images) |image|
+    {
+        if (image.uri != null)
+        {
+            const path = std.mem.span(@ptrCast([*:0]u8, image.uri));
+
+            std.log.info("file path: {s}", .{ path });
+
+            const image_file = try file_directory.openFile(path, .{});
+            defer image_file.close();
+
+            const raw_data = try image_file.readToEndAlloc(allocator, std.math.maxInt(u64));
+            defer allocator.free(raw_data);
+
+            const png_import = try png.import(allocator, raw_data);
+
+            try textures.append(.{
+                .data = png_import.data,
+                .width = png_import.width,
+                .height = png_import.height,
+            });
+        }
+    }
 
     const nodes = cgltf_data.*.scene.*.nodes[0..cgltf_data.*.nodes_count];
 
@@ -149,17 +205,17 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
         const node = node_ptr.*;
         const mesh = node_ptr.*.mesh.*;
 
-        const vertex_start = model_vertices.items.len;
-        const index_start = model_indices.items.len;
-
         std.log.info("node.children_count = {}", .{ node.children_count });
         std.log.info("mesh.primitive_count = {}", .{ mesh.primitives_count });
 
-        var bounding_min: @Vector(3, f32) = .{ 0, 0, 0 };
-        var bounding_max: @Vector(3, f32) = .{ 0, 0, 0 };
-
         for (mesh.primitives[0..mesh.primitives_count]) |primitive|
         {
+            const vertex_start = model_vertices.items.len;
+            const index_start = model_indices.items.len;
+
+            var bounding_min: @Vector(3, f32) = .{ 0, 0, 0 };
+            var bounding_max: @Vector(3, f32) = .{ 0, 0, 0 };
+
             var vertex_count: usize = 0;
             var positions: ?[]const f32 = null; 
             var normals: ?[]const f32 = null; 
@@ -178,7 +234,6 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                     positions = @ptrCast([*]const f32, @alignCast(@alignOf(f32),
                                     @ptrCast([*]u8, buffer_view.*.buffer.*.data.?) + attribute.data.*.offset + buffer_view.*.offset))
                                     [0..attribute.data.*.count * 3];
-                    std.log.info("positions.len = {}", .{ positions.?.len });
                 }
                 else if (std.cstr.cmp(attribute.name, "NORMAL") == 0)
                 {
@@ -216,14 +271,14 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                     uv_index += 2;
                 })
                 {
+                    const position_vector = @Vector(3, f32) { positions.?[position_index], positions.?[position_index + 1], positions.?[position_index + 2], };
+
+                    try model_vertex_positions.append(position_vector);
                     try model_vertices.append(.{
-                        .position = .{ positions.?[position_index], positions.?[position_index + 1], positions.?[position_index + 2], },
                         .normal = .{ normals.?[normal_index], normals.?[normal_index + 1], normals.?[normal_index + 2] },
                         .uv = .{ texture_coordinates.?[uv_index], texture_coordinates.?[uv_index + 1] }, 
                         .color = packUnorm4x8(.{ 1, 1, 1, 1 }),
                     });
-
-                    const position_vector = @Vector(3, f32) { positions.?[position_index], positions.?[position_index + 1], positions.?[position_index + 2], };
 
                     bounding_min = @min(bounding_min, position_vector);
                     bounding_max = @max(bounding_max, position_vector);
@@ -272,37 +327,217 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                     else => unreachable,
                 }
             }
-        }
 
-        try sub_meshes.append(.{
-            .vertex_offset = @intCast(u32, vertex_start),
-            .vertex_count = @intCast(u32, model_vertices.items.len - vertex_start),
-            .index_offset = @intCast(u32, index_start),
-            .index_count = @intCast(u32, model_indices.items.len - index_start),
-            .material_index = 0,
-            .transform = transform_matrix,
-            .bounding_min = bounding_min,
-            .bounding_max = bounding_max,
-        });
+            try sub_meshes.append(.{
+                .vertex_offset = @intCast(u32, vertex_start),
+                .vertex_count = @intCast(u32, model_vertices.items.len - vertex_start),
+                .index_offset = @intCast(u32, index_start),
+                .index_count = @intCast(u32, model_indices.items.len - index_start),
+                .material_index = 0,
+                .transform = transform_matrix,
+                .bounding_min = bounding_min,
+                .bounding_max = bounding_max,
+            });
+        }
     }
 
     std.log.info("unique vertex count: {}", .{ model_vertices.items.len });
     std.log.info("rendered vertex count: {}", .{ model_indices.items.len });
 
+    import_data.vertex_positions = model_vertex_positions.toOwnedSlice();
     import_data.vertices = model_vertices.toOwnedSlice();
     import_data.indices = model_indices.toOwnedSlice();
     import_data.sub_meshes = sub_meshes.toOwnedSlice();
     import_data.materials = materials.toOwnedSlice();
+    import_data.textures = textures.toOwnedSlice();
 
     return import_data;
 }
 
 pub fn importFree(gltf_import: Import, allocator: std.mem.Allocator) void 
 {
+    allocator.free(gltf_import.vertex_positions);
     allocator.free(gltf_import.vertices);
     allocator.free(gltf_import.indices);
     allocator.free(gltf_import.sub_meshes);
     allocator.free(gltf_import.materials);
+    allocator.free(gltf_import.textures);
+}
+
+///Header for the binary format
+const ImportBinHeader = packed struct 
+{
+    vertex_count: u32,
+    index_count: u32,
+    sub_mesh_count: u32,
+    material_count: u32,
+    texture_count: u32,
+};
+
+const ImportBinTexture = packed struct 
+{
+    data_size: u32,
+    width: u32,
+    height: u32,
+};
+
+///Note that the binary format is not necessarily stable or backwards compatible
+///Use runtime imports for modding purposes
+pub fn encode(allocator: std.mem.Allocator, import_data: Import) ![]const u8
+{
+    var size: usize = 0;
+
+    size = std.mem.alignForward(size, @alignOf(ImportBinHeader));
+    size += @sizeOf(ImportBinHeader);    
+
+    size = std.mem.alignForward(size, @alignOf([3]f32));
+    size += @sizeOf([3]f32) * import_data.vertex_positions.len;
+
+    size = std.mem.alignForward(size, @alignOf(Renderer3D.Vertex));
+    size += @sizeOf(Renderer3D.Vertex) * import_data.vertices.len;
+    
+    size = std.mem.alignForward(size, @alignOf(u32));
+    size += @sizeOf(u32) * import_data.indices.len;
+
+    size = std.mem.alignForward(size, @alignOf(Import.SubMesh));
+    size += @sizeOf(Import.SubMesh) * import_data.sub_meshes.len;
+    
+    size = std.mem.alignForward(size, @alignOf(Import.Material));
+    size += @sizeOf(Import.Material) * import_data.materials.len;
+
+    size = std.mem.alignForward(size, @alignOf(ImportBinTexture));
+    size += @sizeOf(ImportBinTexture) * import_data.textures.len;
+
+    var texture_data_size: usize = 0;
+
+    for (import_data.textures) |texture|
+    {
+        texture_data_size += texture.data.len;
+    }
+
+    size += texture_data_size;
+
+    const data = try allocator.alloc(u8, size);
+
+    var data_fba = std.heap.FixedBufferAllocator.init(data); 
+
+    const fba = data_fba.allocator();
+
+    const header = try fba.create(ImportBinHeader);
+
+    header.vertex_count = @intCast(u32, import_data.vertices.len);
+    header.index_count = @intCast(u32, import_data.indices.len);
+    header.sub_mesh_count = @intCast(u32, import_data.sub_meshes.len);
+    header.material_count = @intCast(u32, import_data.materials.len);
+    header.texture_count = @intCast(u32, import_data.textures.len);
+
+    _ = try fba.dupe([3]f32, import_data.vertex_positions);
+    _ = try fba.dupe(Renderer3D.Vertex, import_data.vertices);
+    _ = try fba.dupe(u32, import_data.indices);
+    _ = try fba.dupe(Import.SubMesh, import_data.sub_meshes);
+    _ = try fba.dupe(Import.Material, import_data.materials);
+
+    const textures = try fba.alloc(ImportBinTexture, import_data.textures.len);
+
+    for (textures) |*texture, i|
+    {
+        _ = try fba.dupe(u8, import_data.textures[i].data);
+
+        texture.* = .{
+            .data_size = @intCast(u32, import_data.textures[i].data.len),
+            .width = import_data.textures[i].width,
+            .height = import_data.textures[i].height,
+        };
+    }
+
+    return data_fba.buffer[0..data_fba.end_index];
+}
+
+///Should probably use a specialized structure for decodes
+pub fn decode(allocator: std.mem.Allocator, data: []u8) !Import
+{
+    var import_data = Import
+    {
+        .vertex_positions = &.{},
+        .vertices = &.{},
+        .indices = &.{},
+        .sub_meshes = &.{},
+        .materials = &.{},
+        .textures = &.{},   
+    };
+
+    var offset: usize = 0;
+
+    const header = @ptrCast(*const ImportBinHeader, @alignCast(@alignOf(ImportBinHeader), data.ptr + offset));
+
+    std.log.info("header: {}", .{ header });
+
+    offset = std.mem.alignForward(offset, @alignOf(ImportBinHeader));
+    offset += @sizeOf(ImportBinHeader);
+
+    const vertex_positions_offset = offset;
+
+    offset = std.mem.alignForward(offset, @alignOf([3]f32));
+    offset += @sizeOf([3]f32) * header.vertex_count;
+
+    const vertices_offset = offset;
+
+    offset = std.mem.alignForward(offset, @alignOf(Renderer3D.Vertex));
+    offset += @sizeOf(Renderer3D.Vertex) * header.vertex_count;
+
+    const indices_offset = offset;
+
+    offset = std.mem.alignForward(offset, @alignOf(u32));
+    offset += @sizeOf(u32) * header.index_count;
+
+    const sub_meshs_offset = offset;
+
+    offset = std.mem.alignForward(offset, @alignOf(Import.SubMesh));
+    offset += @sizeOf(Import.SubMesh) * header.sub_mesh_count;
+
+    // const materials_offset = offset;
+
+    offset = std.mem.alignForward(offset, @alignOf(Import.Material));
+    offset += @sizeOf(Import.Material) * header.material_count;
+
+    const textures_offset = offset;
+
+    offset = std.mem.alignForward(offset, @alignOf(ImportBinTexture));
+    offset += @sizeOf(ImportBinTexture) * header.texture_count;
+
+    const texture_data_offset = offset;
+
+    const bin_textures = @ptrCast([*]ImportBinTexture, @alignCast(@alignOf(ImportBinTexture), data.ptr + textures_offset))[0..header.texture_count];
+
+    import_data.textures = try allocator.alloc(Import.Texture, bin_textures.len);
+    errdefer allocator.free(import_data.textures);
+
+    {
+        var current_texture_data_offset: usize = texture_data_offset;
+
+        for (bin_textures) |bin_texture, i|
+        {
+            import_data.textures[i] = .{
+                .data = (data.ptr + current_texture_data_offset)[0..bin_texture.data_size],
+                .width = bin_texture.width,
+                .height = bin_texture.height,
+            };
+
+            current_texture_data_offset += bin_texture.data_size;
+        }
+    }
+
+    import_data.vertex_positions = @ptrCast([*][3]f32, @alignCast(@alignOf([3]f32), data.ptr + vertex_positions_offset))[0..header.vertex_count];
+    import_data.vertices = @ptrCast([*]Renderer3D.Vertex, @alignCast(@alignOf(Renderer3D.Vertex), data.ptr + vertices_offset))[0..header.vertex_count];
+    import_data.indices = @ptrCast([*]u32, @alignCast(@alignOf(u32), data.ptr + indices_offset))[0..header.index_count];
+    import_data.sub_meshes = @ptrCast([*]Import.SubMesh, @alignCast(@alignOf(Import.SubMesh), data.ptr + sub_meshs_offset))[0..header.sub_mesh_count];
+
+    return import_data;
+}
+
+pub fn decodeFree(import_data: Import, allocator: std.mem.Allocator) void 
+{
+    allocator.free(import_data.textures);
 }
 
 fn packUnorm4x8(v: [4]f32) u32

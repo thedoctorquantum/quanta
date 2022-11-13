@@ -9,6 +9,7 @@ pub const Import = struct
     height: u32,
 };
 
+///Also supports png because I'm lazy atm...
 pub fn import(allocator: std.mem.Allocator, data: []const u8) !Import
 {
     var self = Import

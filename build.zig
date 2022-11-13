@@ -58,10 +58,61 @@ fn compileShaderSpecialized(builder: *std.build.Builder, comptime mode: std.buil
     try builder.spawnChild(args);
 }
 
+fn buildQuanta(builder: *std.build.Builder, exe: *std.build.LibExeObjStep) !void 
+{
+    _ = builder;
+
+    exe.addCSourceFile("quanta/src/asset/importers/cgltf.c", &[_][]const u8 {});
+
+    {
+        var package = std.build.Pkg 
+        {
+            .name = "quanta",
+            .source = .{ .path = "quanta/src/main.zig" },
+            .dependencies = &.{
+                glfw.pkg,
+                std.build.Pkg
+                {
+                    .name = "zigimg",
+                    .source = .{ .path = "quanta/lib/zigimg/zigimg.zig" }
+                },
+                std.build.Pkg
+                {
+                    .name = "zalgebra",
+                    .source = .{ .path = "quanta/lib/zalgebra/src/main.zig" }
+                },
+            },
+        };
+
+        exe.addPackage(package);
+
+        try glfw.link(exe.builder, exe, .{});
+    }
+}
+
 pub fn build(builder: *std.build.Builder) !void 
 {
     const target = builder.standardTargetOptions(.{});
     const mode = builder.standardReleaseOptions();
+
+    //example asset build
+    {
+        const exe = builder.addExecutable("example_assets", "example/src/asset_build.zig");
+
+        //technically should be the target the build is running on
+        exe.setTarget(target);
+        exe.setBuildMode(mode);
+        exe.install();
+
+        try buildQuanta(builder, exe);
+
+        const run_cmd = exe.run();
+
+        run_cmd.step.dependOn(builder.getInstallStep());
+
+        const run_step = builder.step("build_assets", "Build example assets");
+        run_step.dependOn(&run_cmd.step);
+    }
 
     //example
     {
@@ -70,43 +121,7 @@ pub fn build(builder: *std.build.Builder) !void
         exe.setBuildMode(mode);
         exe.install();
 
-        exe.addCSourceFile("quanta/src/asset/importers/cgltf.c", &[_][]const u8 {});
-
-        {
-            var package = std.build.Pkg 
-            {
-                .name = "quanta",
-                .source = .{ .path = "quanta/src/main.zig" },
-                .dependencies = &.{
-                    glfw.pkg,
-                    std.build.Pkg
-                    {
-                        .name = "zigimg",
-                        .source = .{ .path = "quanta/lib/zigimg/zigimg.zig" }
-                    },
-                    std.build.Pkg
-                    {
-                        .name = "zalgebra",
-                        .source = .{ .path = "quanta/lib/zalgebra/src/main.zig" }
-                    },
-                },
-            };
-
-            exe.addPackage(package);
-
-            try glfw.link(exe.builder, exe, .{});
-        }
-
-        // var tileset = try png.importFile(builder.allocator, "example/src/assets/tileset.png");
-        // defer png.free(&tileset, builder.allocator);
-
-        // const assets_options = builder.addOptions();
-
-        // // assets_options.addOption([]const u8, "tileset_data", tileset.data);
-        // // assets_options.addOption(u32, "tileset_width", tileset.width);
-        // // assets_options.addOption(u32, "tileset_height", tileset.height);
-
-        // exe.addOptions("assets", assets_options);
+        try buildQuanta(builder, exe);
 
         if (mode == .ReleaseFast or mode == .ReleaseSmall)
         {

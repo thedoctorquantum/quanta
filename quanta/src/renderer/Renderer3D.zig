@@ -52,6 +52,8 @@ depth_image: graphics.Image,
 command_buffers: []graphics.CommandBuffer, 
 frame_fence: graphics.Fence,
 
+vertex_position_buffer: graphics.Buffer,
+vertex_position_offset: usize,
 vertex_buffer: graphics.Buffer,
 vertex_offset: usize,
 index_buffer: graphics.Buffer,
@@ -101,6 +103,7 @@ pub fn init(
     self.draw_index = 0;
     self.vertex_offset = 0;
     self.index_offset = 0;
+    self.vertex_position_offset = 0;
     self.mesh_data_changed = false;
     self.material_data_changed = false;
 
@@ -146,7 +149,10 @@ pub fn init(
     self.mesh_lod_buffer = try graphics.Buffer.init(4096 * 4, .storage);
     errdefer self.mesh_lod_buffer.deinit();
 
-    const vertex_buffer_size = 128 * 1024 * 1024;
+    const vertex_buffer_size = 32 * 1024 * 1024;
+
+    self.vertex_position_buffer = try graphics.Buffer.init(vertex_buffer_size, .vertex);
+    errdefer self.vertex_position_buffer.deinit();
 
     self.vertex_buffer = try graphics.Buffer.init(vertex_buffer_size, .vertex);
     errdefer self.vertex_buffer.deinit();
@@ -215,13 +221,14 @@ pub fn init(
     self.materials_buffer = try graphics.Buffer.init(command_count * @sizeOf(Material), .storage);
     errdefer self.materials_buffer.deinit();
 
-    self.color_pipeline.setDescriptorBuffer(0, 0, self.vertex_buffer);
-    self.color_pipeline.setDescriptorBuffer(1, 0, self.transforms_buffer);
-    self.color_pipeline.setDescriptorBuffer(2, 0, self.material_indices_buffer);
-    self.color_pipeline.setDescriptorBuffer(3, 0, self.draw_indirect_buffer);
-    self.color_pipeline.setDescriptorBuffer(4, 0, self.materials_buffer);
+    self.color_pipeline.setDescriptorBuffer(0, 0, self.vertex_position_buffer);
+    self.color_pipeline.setDescriptorBuffer(1, 0, self.vertex_buffer);
+    self.color_pipeline.setDescriptorBuffer(2, 0, self.transforms_buffer);
+    self.color_pipeline.setDescriptorBuffer(3, 0, self.material_indices_buffer);
+    self.color_pipeline.setDescriptorBuffer(4, 0, self.draw_indirect_buffer);
+    self.color_pipeline.setDescriptorBuffer(5, 0, self.materials_buffer);
 
-    self.depth_pipeline.setDescriptorBuffer(0, 0, self.vertex_buffer);
+    self.depth_pipeline.setDescriptorBuffer(0, 0, self.vertex_position_buffer);
     self.depth_pipeline.setDescriptorBuffer(1, 0, self.transforms_buffer);
     self.depth_pipeline.setDescriptorBuffer(2, 0, self.draw_indirect_buffer);
 
@@ -248,6 +255,7 @@ pub fn deinit() void
     defer self.input_draw_buffer.deinit();
     defer self.mesh_buffer.deinit();
     defer self.mesh_lod_buffer.deinit();
+    defer self.vertex_position_buffer.deinit();
     defer self.vertex_buffer.deinit();
     defer self.index_buffer.deinit();
     defer self.cull_pipeline.deinit(self.allocator);
@@ -358,7 +366,12 @@ fn createPlane(p1: @Vector(3, f32), normal: @Vector(3, f32)) [4]f32
     return .{ normalized_normal[0], normalized_normal[1], normalized_normal[2], distance };
 }
 
-pub fn endRender() !void
+pub fn endRender() void 
+{
+    endRenderInternal() catch unreachable;
+}
+
+fn endRenderInternal() !void
 {
     const image_index = self.swapchain.image_index;
     const image = self.swapchain.swap_images[image_index];
@@ -765,6 +778,7 @@ const MeshLod = extern struct
 pub const MeshHandle = enum(u32) { _ }; 
 
 pub fn createMesh(
+    vertex_positions: []const [3]f32,
     vertices: []const Vertex,
     indices: []const u32,
     bounding_box_min: @Vector(3, f32),
@@ -777,7 +791,7 @@ pub fn createMesh(
     const lod_count = 1;
 
     try self.mesh_lods.append(self.allocator, .{
-        .index_offset = @intCast(u32, self.index_offset / @sizeOf(u32)),
+        .index_offset = @intCast(u32, self.index_offset),
         .index_count = @intCast(u32, indices.len),
     });
 
@@ -789,7 +803,7 @@ pub fn createMesh(
     };
 
     try self.meshes.append(self.allocator, .{
-        .vertex_offset = @intCast(u32, self.vertex_offset / @sizeOf(Vertex)),
+        .vertex_offset = @intCast(u32, self.vertex_position_offset),
         .vertex_count = @intCast(u32, vertices.len),
         .lod_offset  = lod_offset,
         .lod_count = lod_count,
@@ -797,11 +811,14 @@ pub fn createMesh(
         .bounding_box_extents = bounding_box_extents,
     });
 
-    try self.vertex_buffer.update(Vertex, self.vertex_offset, vertices);
-    self.vertex_offset += vertices.len * @sizeOf(Vertex);
+    try self.vertex_position_buffer.update([3]f32, self.vertex_position_offset * @sizeOf([3]f32), vertex_positions);
+    self.vertex_position_offset += vertex_positions.len;
 
-    try self.index_buffer.update(u32, self.index_offset, indices);
-    self.index_offset += indices.len * @sizeOf(u32);
+    try self.vertex_buffer.update(Vertex, self.vertex_offset * @sizeOf(Vertex), vertices);
+    self.vertex_offset += vertices.len;
+
+    try self.index_buffer.update(u32, self.index_offset * @sizeOf(u32), indices);
+    self.index_offset += indices.len;
 
     self.mesh_data_changed = true;
 
@@ -867,7 +884,7 @@ pub fn createMaterial(
 
     std.log.debug("Created material {}", .{ material_handle });
 
-    self.color_pipeline.setDescriptorImageSampler(5, material_handle, albedo_image, albedo_sampler);
+    self.color_pipeline.setDescriptorImageSampler(6, material_handle, albedo_image, albedo_sampler);
 
     try self.materials.append(self.allocator, .{
         .albedo_texture_index = material_handle,
@@ -881,7 +898,6 @@ pub fn createMaterial(
 
 pub const Vertex = extern struct 
 {
-    position: [3]f32,
     normal: [3]f32,
     color: u32,
     uv: [2]f32,
