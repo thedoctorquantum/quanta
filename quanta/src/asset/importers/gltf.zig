@@ -328,12 +328,53 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                 }
             }
 
+            const has_material = primitive.material != null and primitive.material.*.has_pbr_metallic_roughness != 0;
+
+            var material_index: u32 = 0;
+
+            //material
+            if (has_material)
+            {
+                const pbr = primitive.material.*.pbr_metallic_roughness;
+
+                const has_albedo = 
+                    pbr.base_color_texture.texture != null and 
+                    pbr.base_color_texture.texture.*.image != null and 
+                    pbr.base_color_texture.texture.*.image.*.uri != null;
+
+                if (has_albedo)
+                {
+                    
+                    var albedo_index: u32 = 0;
+
+                    for (gltf_images) |*gltf_image, i|
+                    {
+                        if (gltf_image == pbr.base_color_texture.texture.*.image)
+                        {
+                            albedo_index = @intCast(u32, i);
+
+                            break;
+                        }
+                    }
+
+                    //O(n), very bad code...
+                    // const albedo_index = std.mem.indexOf(cgltf.cgltf_image, gltf_images, &.{ pbr.base_color_texture.texture.*.image }) orelse unreachable;
+
+                    material_index = @intCast(u32, materials.items.len);
+
+                    try materials.append(.{
+                        .albedo = .{ 1, 1, 1, 1 },
+                        .albedo_texture_index = albedo_index,
+                    });
+                }
+            }
+
             try sub_meshes.append(.{
                 .vertex_offset = @intCast(u32, vertex_start),
                 .vertex_count = @intCast(u32, model_vertices.items.len - vertex_start),
                 .index_offset = @intCast(u32, index_start),
                 .index_count = @intCast(u32, model_indices.items.len - index_start),
-                .material_index = 0,
+                .material_index = material_index,
                 .transform = transform_matrix,
                 .bounding_min = bounding_min,
                 .bounding_max = bounding_max,
@@ -495,14 +536,14 @@ pub fn decode(allocator: std.mem.Allocator, data: []u8) !Import
     offset = std.mem.alignForward(offset, @alignOf(Import.SubMesh));
     offset += @sizeOf(Import.SubMesh) * header.sub_mesh_count;
 
-    // const materials_offset = offset;
-
     offset = std.mem.alignForward(offset, @alignOf(Import.Material));
+    const materials_offset = offset;
+
     offset += @sizeOf(Import.Material) * header.material_count;
 
-    const textures_offset = offset;
-
     offset = std.mem.alignForward(offset, @alignOf(ImportBinTexture));
+
+    const textures_offset = offset;
     offset += @sizeOf(ImportBinTexture) * header.texture_count;
 
     const texture_data_offset = offset;
@@ -531,6 +572,7 @@ pub fn decode(allocator: std.mem.Allocator, data: []u8) !Import
     import_data.vertices = @ptrCast([*]Renderer3D.Vertex, @alignCast(@alignOf(Renderer3D.Vertex), data.ptr + vertices_offset))[0..header.vertex_count];
     import_data.indices = @ptrCast([*]u32, @alignCast(@alignOf(u32), data.ptr + indices_offset))[0..header.index_count];
     import_data.sub_meshes = @ptrCast([*]Import.SubMesh, @alignCast(@alignOf(Import.SubMesh), data.ptr + sub_meshs_offset))[0..header.sub_mesh_count];
+    import_data.materials = @ptrCast([*]Import.Material, @alignCast(@alignOf(Import.Material), data.ptr + materials_offset))[0..header.material_count];
 
     return import_data;
 }

@@ -57,7 +57,7 @@ pub fn main() !void
 
     const allocator = if (builtin.mode == .Debug) gpa.allocator() else std.heap.c_allocator;
 
-    try window.init(1600, 900, "Quanta Example");
+    try window.init(1920, 1080, "Quanta Example");
     defer window.deinit();
 
     const pipeline_cache_file_path = "pipeline_cache";
@@ -115,7 +115,7 @@ pub fn main() !void
     const test_scene_meshes = try allocator.alloc(Renderer3D.MeshHandle, test_scene_import.sub_meshes.len);
     defer allocator.free(test_scene_meshes);
 
-    const test_scene_materials = try allocator.alloc(Renderer3D.MaterialHandle, test_scene_import.textures.len);
+    const test_scene_materials = try allocator.alloc(Renderer3D.MaterialHandle, test_scene_import.materials.len);
     defer allocator.free(test_scene_materials);
 
     for (test_scene_import.sub_meshes) |sub_mesh, i|
@@ -129,8 +129,10 @@ pub fn main() !void
         );
     }
 
-    for (test_scene_import.textures) |texture, i|
+    for (test_scene_import.materials) |material, i|
     {
+        const texture = &test_scene_import.textures[material.albedo_texture_index];
+
         test_scene_materials[i] = try Renderer3D.createMaterial(
             texture.data,
             texture.width, 
@@ -336,7 +338,7 @@ pub fn main() !void
 
             for (test_scene_import.sub_meshes) |sub_mesh, i|
             {
-                Renderer3D.drawMesh(test_scene_meshes[i], test_scene_materials[0], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
+                Renderer3D.drawMesh(test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
             }
 
             const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
