@@ -859,11 +859,58 @@ pub fn getMemoryTypeIndex(requirements: vk.MemoryRequirements, properties: vk.Me
     return error.MemoryTypeNotFound;    
 }
 
+pub fn getMemoryTypeIndexHostPointer(host_pointer: [*]const u8, properties: vk.MemoryPropertyFlags) !u32
+{
+    var host_pointer_properties: vk.MemoryHostPointerPropertiesEXT = .{ .memory_type_bits = 0 };
+
+    try self.vkd.getMemoryHostPointerPropertiesEXT(
+        self.device, 
+        .{ .host_allocation_bit_ext = true }, 
+        @intToPtr(*anyopaque, @ptrToInt(host_pointer)), 
+        &host_pointer_properties
+    );
+
+    var memory_type_index: u32 = 0; 
+    
+    while (memory_type_index < self.physical_device_memory_properties.memory_type_count) : (memory_type_index += 1)
+    {
+        const memory_type = self.physical_device_memory_properties.memory_types[memory_type_index];
+        const has_properties = memory_type.property_flags.contains(properties);
+
+        if (has_properties and 
+            ((@as(u32, 1) << @intCast(u5, @bitCast(u32, memory_type_index))) & @bitCast(u32, host_pointer_properties.memory_type_bits)) != 0
+        )
+        {
+            return memory_type_index;
+        }
+    }
+
+    return error.MemoryTypeNotFound;    
+}
+
 pub fn deviceAllocate(requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !vk.DeviceMemory
 {
     return try self.vkd.allocateMemory(self.device, &.{
         .allocation_size = requirements.size,
         .memory_type_index = try getMemoryTypeIndex(requirements, properties),
+    }, &self.allocation_callbacks);    
+}
+
+pub fn deviceAllocateHostMemory(
+    properties: vk.MemoryPropertyFlags,
+    host_memory: []const u8,
+) !vk.DeviceMemory
+{
+    const host_pointer = @intToPtr(*anyopaque, @ptrToInt(host_memory.ptr));
+
+    return try self.vkd.allocateMemory(self.device, &.{
+        .p_next = &vk.ImportMemoryHostPointerInfoEXT 
+        {
+            .handle_type = .{ .host_allocation_bit_ext = true },
+            .p_host_pointer = host_pointer,
+        },
+        .allocation_size = host_memory.len,
+        .memory_type_index = try getMemoryTypeIndexHostPointer(host_memory.ptr, properties),
     }, &self.allocation_callbacks);    
 }
 

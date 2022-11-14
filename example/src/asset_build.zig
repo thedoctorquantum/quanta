@@ -14,10 +14,10 @@ pub fn main() !void
 
     const allocator = gpa.allocator();
 
-    const sponza = try gltf.import(allocator, "example/src/assets/sponza/Sponza.gltf");
+    const sponza = try gltf.import(allocator, "example/src/assets/test_scene.gltf");
     defer gltf.importFree(sponza, allocator);
 
-    const sponza_file = std.fs.cwd().openFile(cache_directory ++ "Suzanne", .{ .mode = .write_only }) catch try std.fs.cwd().createFile(cache_directory ++ "Suzanne", .{});
+    const sponza_file = std.fs.cwd().openFile(cache_directory ++ "dragon", .{ .mode = .write_only }) catch try std.fs.cwd().createFile(cache_directory ++ "dragon", .{});
     defer sponza_file.close();
 
     try sponza_file.seekTo(0);

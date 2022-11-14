@@ -97,22 +97,7 @@ pub fn main() !void
     try Renderer3D.init(allocator, &swapchain);
     defer Renderer3D.deinit();
 
-    // const tileset_import = try png.import(allocator, @embedFile("assets/tileset.png"));
-    // defer allocator.free(tileset_import.data);
-
-    // const wood_floor_import = try png.import(allocator, @embedFile("assets/wood_floor.png"));
-    // defer allocator.free(wood_floor_import.data);
-
     const test_scene_file_path = "zig-out/bin/assets/Suzanne";
-
-    //generic allocator api
-    // {
-        // const test_scene_import_blob_file = try std.fs.cwd().openFile("zig-out/bin/assets/Suzanne", .{});
-        // defer test_scene_import_blob_file.close();
-    // }
-
-    // const test_scene_import_blob = try test_scene_import_blob_file.readToEndAlloc(allocator, std.math.maxInt(u32));
-    // defer allocator.free(test_scene_import_blob);
 
     const test_scene_fd = try std.os.open(test_scene_file_path, std.os.O.RDONLY, std.os.S.IRUSR | std.os.S.IWUSR);
     defer std.os.close(test_scene_fd);
