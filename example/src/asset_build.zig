@@ -17,12 +17,12 @@ pub fn main() !void
     const sponza = try gltf.import(allocator, "example/src/assets/test_scene.gltf");
     defer gltf.importFree(sponza, allocator);
 
-    const sponza_file = std.fs.cwd().openFile(cache_directory ++ "dragon", .{ .mode = .write_only }) catch try std.fs.cwd().createFile(cache_directory ++ "dragon", .{});
+    const sponza_file = std.fs.cwd().openFile(cache_directory ++ "test_scene", .{ .mode = .write_only }) catch try std.fs.cwd().createFile(cache_directory ++ "test_scene", .{});
     defer sponza_file.close();
 
     try sponza_file.seekTo(0);
 
     const sponza_encoded = try gltf.encode(allocator, sponza);
 
-    try sponza_file.writeAll(sponza_encoded); 
+    try sponza_file.writeAll(sponza_encoded);
 }

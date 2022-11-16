@@ -89,6 +89,217 @@ pub fn end(self: CommandBuffer) void
     Context.self.vkd.endCommandBuffer(self.handle) catch unreachable;
 }
 
+//Mabye not good idea to do all this work automatically, but ehh it's convenient and may improve driver/gpu
+//performance enough that it's well worth it
+fn placePendingBarriers(self: CommandBuffer) void 
+{
+    if (
+        self.consecutive_memory_barrier_count == 0 or
+        self.consecutive_image_barrier_count == 0
+    )
+    {
+        return;
+    }
+
+    //the whole point of this function is to eventually batch all calls to vkImage/Buffer/Memory barrier to
+    //reduce dispatch overhead and allow the driver to optimise the barrier itself
+    for (self.consecutive_memory_barriers[0..self.consecutive_memory_barrier_count]) |memory_barrier|
+    {
+        self.memoryBarrier(memory_barrier);
+    }
+
+    for (self.consecutive_image_barrier_images[0..self.consecutive_image_barrier_count]) |image_barrier, i|
+    {
+        self.imageBarrier(self.consecutive_image_barrier_images[i].*, image_barrier);
+    }
+
+    defer self.consecutive_memory_barrier_count = 0;
+    defer self.consecutive_image_barrier_count = 0;
+}
+
+pub const PipelineStage = packed struct 
+{
+    all_commands: bool = false,
+    color_attachment_output: bool = false,
+    early_fragment_tests: bool = false,
+    late_fragment_tests: bool = false,
+    draw_indirect: bool = false,
+    vertex_shader: bool = false,
+    fragment_shader: bool = false,
+    compute_shader: bool = false,
+    copy: bool = false,
+};
+
+inline fn getVkPipelineStage(pipeline_stage: PipelineStage) vk.PipelineStageFlags2
+{
+    return vk.PipelineStageFlags2 
+    {
+        .all_commands_bit = pipeline_stage.all_commands,
+        .color_attachment_output_bit = pipeline_stage.color_attachment_output,
+        .early_fragment_tests_bit = pipeline_stage.early_fragment_tests,
+        .late_fragment_tests_bit = pipeline_stage.late_fragment_tests,
+        .draw_indirect_bit = pipeline_stage.draw_indirect,
+        .vertex_shader_bit = pipeline_stage.vertex_shader,
+        .fragment_shader_bit = pipeline_stage.fragment_shader,
+        .compute_shader_bit = pipeline_stage.compute_shader,
+        .copy_bit = pipeline_stage.copy,
+    };
+}
+
+pub const ResourceAccess = packed struct 
+{
+    color_attachment_read: bool = false,
+    color_attachment_write: bool = false,
+    depth_attachment_read: bool = false,
+    depth_attachment_write: bool = false,
+    shader_read: bool = false,
+    shader_write: bool = false, 
+    indirect_command_read: bool = false,
+    transfer_read: bool = false,
+    transfer_write: bool = false,
+};
+
+inline fn getVkResourceAccess(resource_access: ResourceAccess) vk.AccessFlags2
+{
+    return vk.AccessFlags2 
+    {
+        .index_read_bit = false,
+        .vertex_attribute_read_bit = false,
+        .uniform_read_bit = false,
+        .input_attachment_read_bit = false,
+        .shader_read_bit = resource_access.shader_read,
+        .shader_write_bit = resource_access.shader_write,
+        .color_attachment_read_bit = resource_access.color_attachment_read,
+        .color_attachment_write_bit = resource_access.color_attachment_write,
+        .depth_stencil_attachment_read_bit = resource_access.depth_attachment_read,
+        .depth_stencil_attachment_write_bit = resource_access.depth_attachment_write,
+        .transfer_read_bit = resource_access.transfer_read,
+        .transfer_write_bit = resource_access.transfer_write,
+        .host_read_bit = false,
+        .host_write_bit = false,
+        .memory_read_bit = false,
+        .memory_write_bit = false,
+        .indirect_command_read_bit = resource_access.indirect_command_read,
+    };
+}
+
+pub const MemoryBarrier = packed struct 
+{
+    source_stage: PipelineStage,
+    source_access: ResourceAccess,
+    destination_stage: PipelineStage,
+    destination_access: ResourceAccess,
+};
+
+pub fn memoryBarrier(self: CommandBuffer, barrier: MemoryBarrier) void 
+{
+    Context.self.vkd.cmdPipelineBarrier2(
+        self.handle, 
+        &.{
+            .dependency_flags = .{ .by_region_bit = true, },
+            .memory_barrier_count = 1,
+            .p_memory_barriers = &[_]vk.MemoryBarrier2
+            {
+                .{
+                    .src_stage_mask = getVkPipelineStage(barrier.source_stage),
+                    .src_access_mask = getVkResourceAccess(barrier.source_access),
+                    .dst_stage_mask = getVkPipelineStage(barrier.destination_stage),
+                    .dst_access_mask = getVkResourceAccess(barrier.destination_access),
+                }
+            },
+            .buffer_memory_barrier_count = 0,
+            .p_buffer_memory_barriers = undefined,
+            .image_memory_barrier_count = 0,
+            .p_image_memory_barriers = undefined,
+        }
+    );
+}
+
+pub const ImageBarrier = struct 
+{
+    source_stage: PipelineStage,
+    source_access: ResourceAccess,
+    source_layout: vk.ImageLayout = .@"undefined",
+    destination_stage: PipelineStage,
+    destination_access: ResourceAccess,
+    destination_layout: vk.ImageLayout = .@"undefined",
+};
+
+pub fn imageBarrier(
+    self: CommandBuffer,
+    image: Image,
+    barrier: ImageBarrier,
+) void 
+{
+    Context.self.vkd.cmdPipelineBarrier2(
+        self.handle, 
+        &.{
+            .dependency_flags = .{ .by_region_bit = true, },
+            .memory_barrier_count = 0,
+            .p_memory_barriers = undefined,
+            .buffer_memory_barrier_count = 0,
+            .p_buffer_memory_barriers = undefined,
+            .image_memory_barrier_count = 1,
+            .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+            {
+                .src_stage_mask = getVkPipelineStage(barrier.source_stage),
+                .src_access_mask = getVkResourceAccess(barrier.source_access),
+                .dst_stage_mask = getVkPipelineStage(barrier.source_stage),
+                .dst_access_mask = getVkResourceAccess(barrier.destination_access),
+                .old_layout = barrier.source_layout,
+                .new_layout = barrier.destination_layout,
+                .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                .image = image.handle,
+                .subresource_range = .{
+                    .aspect_mask = image.aspect_mask,
+                    .base_mip_level = 0,
+                    .level_count = vk.REMAINING_MIP_LEVELS,
+                    .base_array_layer = 0,
+                    .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                },
+            }),
+        }
+    );
+}
+
+pub const BufferBarrier = struct 
+{
+    source_stage: PipelineStage,
+    source_access: ResourceAccess,
+    destination_stage: PipelineStage,
+    destination_access: ResourceAccess,
+};
+
+pub fn bufferBarrier(self: CommandBuffer, buffer: Buffer, barrier: BufferBarrier) void 
+{
+    Context.self.vkd.cmdPipelineBarrier2(
+        self.handle, 
+        &.{
+            .dependency_flags = .{ .by_region_bit = true, },
+            .memory_barrier_count = 0,
+            .p_memory_barriers = undefined,
+            .buffer_memory_barrier_count = 1,
+            .p_buffer_memory_barriers = &[_]vk.BufferMemoryBarrier2
+            {
+                .{
+                    .src_stage_mask = getVkPipelineStage(barrier.source_stage),
+                    .src_access_mask = getVkResourceAccess(barrier.source_access),
+                    .dst_stage_mask = getVkPipelineStage(barrier.destination_stage),
+                    .dst_access_mask = getVkResourceAccess(barrier.destination_access),
+                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                    .buffer = buffer.handle,
+                    .offset = 0,
+                    .size = buffer.size,
+                },
+            },
+            .image_memory_barrier_count = 0,
+            .p_image_memory_barriers = undefined,
+        }
+    );
+}
+
 ///Places an event which signals when the previous commands are finished executing
 pub fn setEvent(self: CommandBuffer, event: Event) void 
 {

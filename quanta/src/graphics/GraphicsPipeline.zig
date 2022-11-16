@@ -23,7 +23,8 @@ pub const Options = struct
     stencil_attachment_format: ?vk.Format = null,
     vertex_shader_binary: []align(4) const u8,
     fragment_shader_binary: []align(4) const u8,
-    depth_state: DepthState,
+    depth_state: DepthState = .{},
+    rasterisation_state: RasterisationState = .{},
 
     pub const DepthState = struct 
     {
@@ -38,6 +39,17 @@ pub const Options = struct
             greater,
             greater_or_equal,
             always,
+        };
+    };
+
+    pub const RasterisationState = struct 
+    {
+        polygon_mode: PolygonMode = .fill,
+
+        pub const PolygonMode = enum 
+        {
+            fill,
+            line,
         };
     };
 };
@@ -365,7 +377,11 @@ pub fn init(
                     .flags = .{},
                     .depth_clamp_enable = vk.FALSE,
                     .rasterizer_discard_enable = vk.FALSE,
-                    .polygon_mode = .fill,
+                    .polygon_mode = switch (options.rasterisation_state.polygon_mode)
+                    {
+                        .fill => vk.PolygonMode.fill,
+                        .line => vk.PolygonMode.line,
+                    },
                     .line_width = 1,
                     .cull_mode = .{ .back_bit = true, },
                     .front_face = .clockwise,

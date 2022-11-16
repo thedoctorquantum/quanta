@@ -71,6 +71,9 @@ vertex_offset: usize,
 index_buffer: graphics.Buffer,
 index_offset: usize,
 
+depth_reduce_sampler: graphics.Sampler,
+
+depth_reduce_pipeline: graphics.ComputePipeline,
 cull_pipeline: graphics.ComputePipeline,
 depth_pipeline: graphics.GraphicsPipeline,
 color_pipeline: graphics.GraphicsPipeline,
@@ -184,6 +187,18 @@ pub fn init(
     self.index_buffer = try graphics.Buffer.init(vertex_buffer_size, .index);
     errdefer self.index_buffer.deinit();
 
+    self.depth_reduce_sampler = try graphics.Sampler.init(.nearest, .nearest, .min);
+    errdefer self.depth_reduce_sampler.deinit();
+
+    self.depth_reduce_pipeline = try graphics.ComputePipeline.init(
+        self.allocator, 
+        cull_comp_spv, 
+        .@"2d",
+        null,
+        DrawCullPushConstants
+    );
+    errdefer self.depth_reduce_pipeline.deinit(self.allocator);
+
     self.cull_pipeline = try graphics.ComputePipeline.init(
         self.allocator, 
         cull_comp_spv, 
@@ -208,6 +223,9 @@ pub fn init(
                 .test_enabled = true,
                 .compare_op = .greater_or_equal,
             },
+            .rasterisation_state = .{
+                .polygon_mode = .line,
+            },
         },
         null,
         ColorPassPushConstants,
@@ -225,6 +243,9 @@ pub fn init(
                 .write_enabled = true,
                 .test_enabled = true,
                 .compare_op = .greater,
+            },
+            .rasterisation_state = .{
+                .polygon_mode = .line,
             },
         },
         null,
@@ -289,6 +310,8 @@ pub fn deinit() void
     defer self.vertex_position_buffer.deinit();
     defer self.vertex_buffer.deinit();
     defer self.index_buffer.deinit();
+    defer self.depth_reduce_sampler.deinit();
+    defer self.depth_reduce_pipeline.deinit(self.allocator);
     defer self.cull_pipeline.deinit(self.allocator);
     defer self.depth_pipeline.deinit(self.allocator);
     defer self.color_pipeline.deinit(self.allocator);
@@ -559,107 +582,34 @@ fn endRenderInternal() !void
         zalgebra.lookAt(
             .{ .data = self.camera.translation }, 
             .{ .data = self.camera.target }, 
-            .{ .data = .{ 0, -1, 0 } }
+            .{ .data = .{ 0, -1, 0 } }, //May be problematic, we could flip the ndc clip space instead using vk_maintenence_4 
         )
     );
+
+    //sneaky hack due to our incomplete swapchain abstraction
+    var color_image: Image = undefined;
+
+    color_image.view = image.view;
+    color_image.handle = image.image;
+    color_image.aspect_mask = .{ .color_bit = true };
 
     {
         command_buffer.begin() catch unreachable;
         defer command_buffer.end();
 
-        //compute pass #1 pre depth cull
+        //compute pass #1 pre depth per instance cull
         {
-            GraphicsContext.self.vkd.cmdPipelineBarrier2(
-                command_buffer.handle, 
-                &.{
-                    .dependency_flags = .{ .by_region_bit = true, },
-                    .memory_barrier_count = 0,
-                    .p_memory_barriers = undefined,
-                    .buffer_memory_barrier_count = 0,
-                    .p_buffer_memory_barriers = undefined,
-                    .image_memory_barrier_count = 1,
-                    .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                    {
-                        .src_stage_mask = .{ .all_commands_bit = true },
-                        .src_access_mask = .{},
-                        .dst_stage_mask = .{ .color_attachment_output_bit = true },
-                        .dst_access_mask = .{ .color_attachment_write_bit = true },
-                        .old_layout = .@"undefined",
-                        .new_layout = .attachment_optimal,
-                        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                        .image = image.image,
-                        .subresource_range = .{
-                            .aspect_mask = .{ .color_bit = true },
-                            .base_mip_level = 0,
-                            .level_count = vk.REMAINING_MIP_LEVELS,
-                            .base_array_layer = 0,
-                            .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                        },
-                    }),
-                }
-            );
-
-            GraphicsContext.self.vkd.cmdPipelineBarrier2(
-                command_buffer.handle, 
-                &.{
-                    .dependency_flags = .{ .by_region_bit = true, },
-                    .memory_barrier_count = 0,
-                    .p_memory_barriers = undefined,
-                    .buffer_memory_barrier_count = 0,
-                    .p_buffer_memory_barriers = undefined,
-                    .image_memory_barrier_count = 1,
-                    .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                    {
-                        .src_stage_mask = .{ .all_commands_bit = true },
-                        .src_access_mask = .{},
-                        .dst_stage_mask = .{ .color_attachment_output_bit = true },
-                        .dst_access_mask = .{ .color_attachment_write_bit = true },
-                        .old_layout = .@"undefined",
-                        .new_layout = .attachment_optimal,
-                        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                        .image = self.depth_image.handle,
-                        .subresource_range = .{
-                            .aspect_mask = .{ .depth_bit = true },
-                            .base_mip_level = 0,
-                            .level_count = vk.REMAINING_MIP_LEVELS,
-                            .base_array_layer = 0,
-                            .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                        },
-                    }),
-                }
-            );
 
             command_buffer.setComputePipeline(self.cull_pipeline);
             
             command_buffer.fillBuffer(self.draw_indirect_count_buffer, 0, @sizeOf(u32), 0);
 
-            GraphicsContext.self.vkd.cmdPipelineBarrier2(
-                command_buffer.handle, 
-                &.{
-                    .dependency_flags = .{ .by_region_bit = true, },
-                    .memory_barrier_count = 0,
-                    .p_memory_barriers = undefined,
-                    .buffer_memory_barrier_count = 1,
-                    .p_buffer_memory_barriers = &[_]vk.BufferMemoryBarrier2
-                    {
-                        .{
-                            .src_stage_mask = .{ .copy_bit = true },
-                            .src_access_mask = .{ .transfer_write_bit = true },
-                            .dst_stage_mask = .{ .compute_shader_bit = true, },
-                            .dst_access_mask = .{ .shader_read_bit = true, .shader_write_bit = true },
-                            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                            .buffer = self.draw_indirect_count_buffer.handle,
-                            .offset = 0,
-                            .size = self.draw_indirect_count_buffer.size,
-                        }
-                    },
-                    .image_memory_barrier_count = 0,
-                    .p_image_memory_barriers = undefined,
-                }
-            );
+            command_buffer.bufferBarrier(self.draw_indirect_count_buffer, .{
+                .source_stage = .{ .copy = true },
+                .source_access = .{ .transfer_write = true },
+                .destination_stage = .{ .compute_shader = true },
+                .destination_access = .{ .shader_read = true, .shader_write = true },
+            });
 
             var near_face: [4]f32 = .{ 0, 0, 0, 0 };
             var far_face: [4]f32 = .{ 0, 0, 0, 0 };
@@ -685,46 +635,33 @@ fn endRenderInternal() !void
             });
             command_buffer.computeDispatch(self.draw_index, 1, 1);
 
-            GraphicsContext.self.vkd.cmdPipelineBarrier2(
-                command_buffer.handle, 
-                &.{
-                    .dependency_flags = .{ .by_region_bit = true, },
-                    .memory_barrier_count = 0,
-                    .p_memory_barriers = undefined,
-                    .buffer_memory_barrier_count = 2,
-                    .p_buffer_memory_barriers = &[_]vk.BufferMemoryBarrier2
-                    {
-                        .{
-                            .src_stage_mask = .{ .compute_shader_bit = true },
-                            .src_access_mask = .{ .shader_write_bit = true },
-                            .dst_stage_mask = .{ .draw_indirect_bit = true, .vertex_shader_bit = true }, //vk.PipelineStageFlags2
-                            .dst_access_mask = .{ .indirect_command_read_bit = true, .shader_read_bit = true },
-                            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                            .buffer = self.draw_indirect_buffer.handle,
-                            .offset = 0,
-                            .size = self.draw_indirect_buffer.size,
-                        },
-                        .{
-                            .src_stage_mask = .{ .compute_shader_bit = true },
-                            .src_access_mask = .{ .shader_write_bit = true },
-                            .dst_stage_mask = .{ .draw_indirect_bit = true, },
-                            .dst_access_mask = .{ .indirect_command_read_bit = true },
-                            .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                            .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                            .buffer = self.draw_indirect_count_buffer.handle,
-                            .offset = 0,
-                            .size = self.draw_indirect_count_buffer.size,
-                        },
-                    },
-                    .image_memory_barrier_count = 0,
-                    .p_image_memory_barriers = undefined,
-                }
-            );
+            command_buffer.bufferBarrier(self.draw_indirect_buffer, .{
+                .source_stage = .{ .compute_shader = true },
+                .source_access = .{ .shader_write = true },
+                .destination_stage = .{ .draw_indirect = true, .vertex_shader = true },
+                .destination_access = .{ .indirect_command_read = true, .shader_read = true },
+            });
+            command_buffer.bufferBarrier(self.draw_indirect_count_buffer, .{
+                .source_stage = .{ .compute_shader = true },
+                .source_access = .{ .shader_write = true },
+                .destination_stage = .{ .draw_indirect = true },
+                .destination_access = .{ .indirect_command_read = true },
+            });
         }
 
         //Depth pass #1
         {
+            command_buffer.imageBarrier(
+                self.depth_image, 
+                .{
+                    .source_stage = .{ .all_commands = true },
+                    .source_access = .{},
+                    .destination_stage = .{ .color_attachment_output = true },
+                    .destination_access = .{ .depth_attachment_write = true },
+                    .destination_layout = .attachment_optimal,
+                }
+            );
+
             command_buffer.beginRenderPass(
                 0, 
                 0, 
@@ -756,33 +693,34 @@ fn endRenderInternal() !void
             );
         }
 
-        GraphicsContext.self.vkd.cmdPipelineBarrier2(
-            command_buffer.handle, 
-            &.{
-                .dependency_flags = .{ .by_region_bit = true, },
-                .memory_barrier_count = 1,
-                .p_memory_barriers = &[_]vk.MemoryBarrier2
-                {
-                    .{
-                        .src_stage_mask = vk.PipelineStageFlags2 { .late_fragment_tests_bit = true, },
-                        .src_access_mask = vk.AccessFlags2 { .depth_stencil_attachment_write_bit = true },
-                        .dst_stage_mask = .{ .early_fragment_tests_bit = true,  },
-                        .dst_access_mask = .{ .depth_stencil_attachment_read_bit = true, },
-                    }
-                },
-                .buffer_memory_barrier_count = 0,
-                .p_buffer_memory_barriers = undefined,
-                .image_memory_barrier_count = 0,
-                .p_image_memory_barriers = undefined,
-            }
-        );
+        command_buffer.memoryBarrier(.{
+            .source_stage = .{ .late_fragment_tests = true },
+            .source_access = .{ .depth_attachment_write = true },
+            .destination_stage = .{ .early_fragment_tests = true },
+            .destination_access = .{ .depth_attachment_read = true },
+        });
+
+        //Depth reduce
+        if (false)
+        {
+            command_buffer.setComputePipeline(self.depth_reduce_pipeline);
+            command_buffer.computeDispatch(1, 1, 1);
+        }
+
+        //Post depth per instance cull #1
+        {
+            
+        }
 
         //Color pass #1
         {
-            var color_image: Image = undefined;
-
-            color_image.view = image.view;
-            color_image.handle = image.image;
+            command_buffer.imageBarrier(color_image, .{
+                .source_stage = .{ .all_commands = true },
+                .source_access = .{},
+                .destination_stage = .{ .color_attachment_output = true },
+                .destination_access = .{ .color_attachment_write = true },
+                .destination_layout = .attachment_optimal,
+            });
 
             command_buffer.beginRenderPass(
                 0, 
@@ -821,36 +759,14 @@ fn endRenderInternal() !void
             );
         }
 
-        GraphicsContext.self.vkd.cmdPipelineBarrier2(
-            command_buffer.handle, 
-            &.{
-                .dependency_flags = .{ .by_region_bit = true, },
-                .memory_barrier_count = 0,
-                .p_memory_barriers = undefined,
-                .buffer_memory_barrier_count = 0,
-                .p_buffer_memory_barriers = undefined,
-                .image_memory_barrier_count = 1,
-                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                {
-                    .src_stage_mask = .{ .color_attachment_output_bit = true },
-                    .src_access_mask = .{ .color_attachment_write_bit = true },
-                    .dst_stage_mask = .{},
-                    .dst_access_mask = .{},
-                    .old_layout = .attachment_optimal,
-                    .new_layout = .present_src_khr,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = image.image,
-                    .subresource_range = .{
-                        .aspect_mask = .{ .color_bit = true },
-                        .base_mip_level = 0,
-                        .level_count = vk.REMAINING_MIP_LEVELS,
-                        .base_array_layer = 0,
-                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                    },
-                }),
-            }
-        );
+        command_buffer.imageBarrier(color_image, .{
+            .source_stage = .{ .color_attachment_output = true, },
+            .source_access = .{  .color_attachment_write = true },
+            .source_layout = .attachment_optimal,
+            .destination_stage = .{},
+            .destination_access = .{},
+            .destination_layout = .present_src_khr,
+        });
     }
 
     try GraphicsContext.self.vkd.queueSubmit2(GraphicsContext.self.graphics_queue, 1, &[_]vk.SubmitInfo2
@@ -1047,7 +963,7 @@ pub fn createMaterial(
     try self.image_transfer_events.append(self.allocator, albedo_transfer_event);
     try self.image_staging_buffers.append(self.allocator, albedo_staging_buffer);
 
-    var albedo_sampler = try Sampler.init();
+    var albedo_sampler = try Sampler.init(.nearest, .nearest, null);
     errdefer albedo_sampler.deinit();
     
     try self.albedo_samplers.append(self.allocator, albedo_sampler);
