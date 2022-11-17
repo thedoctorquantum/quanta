@@ -13,3 +13,6 @@
 [submodule "quanta/lib/cgltf"]
 	path = quanta/lib/cgltf
 	url = https://github.com/jkuhlmann/cgltf.git
+[submodule "quanta/lib/Nuklear"]
+	path = quanta/lib/Nuklear
+	url = https://github.com/Immediate-Mode-UI/Nuklear.git

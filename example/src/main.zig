@@ -16,6 +16,7 @@ const zalgebra = quanta.math.zalgebra;
 
 const graphics = quanta.graphics;
 const Renderer3D = quanta.renderer.Renderer3D;
+const RendererGui = quanta.renderer_gui.RendererGui;
 
 const shaders = @import("shaders.zig");
 const assets = @import("assets");
@@ -96,6 +97,9 @@ pub fn main() !void
 
     try Renderer3D.init(allocator, &swapchain);
     defer Renderer3D.deinit();
+
+    try RendererGui.init(allocator);
+    defer RendererGui.deinit();
 
     const test_scene_file_path = "zig-out/bin/assets/Suzanne";
 

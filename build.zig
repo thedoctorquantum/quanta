@@ -133,6 +133,10 @@ pub fn build(builder: *std.build.Builder) !void
         try compileShader(builder, mode, "vert", "quanta/src/renderer/depth.vert.glsl", "quanta/src/renderer/spirv/depth.vert.spv");
         try compileShader(builder, mode, "frag", "quanta/src/renderer/depth.frag.glsl", "quanta/src/renderer/spirv/depth.frag.spv");
         try compileShader(builder, mode, "comp", "quanta/src/renderer/cull.comp.glsl", "quanta/src/renderer/spirv/cull.comp.spv");
+        try compileShader(builder, mode, "comp", "quanta/src/renderer/depth_reduce.comp.glsl", "quanta/src/renderer/spirv/depth_reduce.comp.spv");
+
+        try compileShader(builder, mode, "vert", "quanta/src/renderer_gui/rectangle.vert.glsl", "quanta/src/renderer_gui/spirv/rectangle.vert.spv");
+        try compileShader(builder, mode, "frag", "quanta/src/renderer_gui/rectangle.frag.glsl", "quanta/src/renderer_gui/spirv/rectangle.frag.spv");
 
         const run_cmd = exe.run();
         run_cmd.step.dependOn(builder.getInstallStep());

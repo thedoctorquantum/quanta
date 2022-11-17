@@ -16,6 +16,7 @@ aspect_mask: vk.ImageAspectFlags,
 width: u32,
 height: u32,
 depth: u32,
+levels: u32,
 
 pub fn initData(
     data: []const u8,
@@ -59,8 +60,10 @@ pub fn init(
     width: u32,
     height: u32,
     depth: u32,
+    levels: u32,
     format: vk.Format,
     layout: vk.ImageLayout,
+    usage: vk.ImageUsageFlags,
 ) !Image 
 {
     var self = Image
@@ -73,6 +76,7 @@ pub fn init(
         .width = width,
         .height = height,
         .depth = depth,
+        .levels = levels,
         .aspect_mask = .{
             .color_bit = format != vk.Format.d32_sfloat,
             .depth_bit = format == vk.Format.d32_sfloat,
@@ -87,11 +91,11 @@ pub fn init(
             .image_type = .@"2d",
             .format = format,
             .extent = .{ .width = width, .height = height, .depth = depth },
-            .mip_levels = 1,
+            .mip_levels = levels,
             .array_layers = 1,
             .samples = .{ .@"1_bit" = true, },
             .tiling = .optimal,
-            .usage = .{ .transfer_dst_bit = true, .sampled_bit = true, .depth_stencil_attachment_bit = self.aspect_mask.depth_bit },
+            .usage = usage,
             .sharing_mode = .exclusive,
             .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
@@ -121,7 +125,7 @@ pub fn init(
             .subresource_range = .{
                 .aspect_mask = self.aspect_mask,
                 .base_mip_level = 0,
-                .level_count = 1,
+                .level_count = levels,
                 .base_array_layer = 0,
                 .layer_count = 1,
             },
@@ -130,49 +134,52 @@ pub fn init(
     );
     errdefer Context.self.vkd.destroyImageView(Context.self.device, self.view, &Context.self.allocation_callbacks);
 
-    var command_buffer = try CommandBuffer.init(.graphics);
-    defer command_buffer.deinit();
-
+    if (layout == .transfer_dst_optimal or usage.transfer_dst_bit)
     {
-        try command_buffer.begin();
+        var command_buffer = try CommandBuffer.init(.graphics);
+        defer command_buffer.deinit();
 
-        Context.self.vkd.cmdPipelineBarrier2(
-            command_buffer.handle, 
-            &.{
-                .dependency_flags = .{ .by_region_bit = true, },
-                .memory_barrier_count = 0,
-                .p_memory_barriers = undefined,
-                .buffer_memory_barrier_count = 0,
-                .p_buffer_memory_barriers = undefined,
-                .image_memory_barrier_count = 1,
-                .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-                {
-                    .src_stage_mask = .{
-                        .top_of_pipe_bit = true,
-                    },
-                    .dst_stage_mask = .{
-                        .copy_bit = true,
-                    },
-                    .src_access_mask = .{},
-                    .dst_access_mask = .{ .transfer_write_bit = true, },
-                    .old_layout = .@"undefined",
-                    .new_layout = .transfer_dst_optimal,
-                    .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-                    .image = self.handle,
-                    .subresource_range = .{
-                        .aspect_mask = self.aspect_mask,
-                        .base_mip_level = 0,
-                        .level_count = vk.REMAINING_MIP_LEVELS,
-                        .base_array_layer = 0,
-                        .layer_count = vk.REMAINING_ARRAY_LAYERS,
-                    },
-                }),
-            }
-        );
+        {
+            try command_buffer.begin();
 
-        command_buffer.end();
-        try command_buffer.submitAndWait();
+            Context.self.vkd.cmdPipelineBarrier2(
+                command_buffer.handle, 
+                &.{
+                    .dependency_flags = .{ .by_region_bit = true, },
+                    .memory_barrier_count = 0,
+                    .p_memory_barriers = undefined,
+                    .buffer_memory_barrier_count = 0,
+                    .p_buffer_memory_barriers = undefined,
+                    .image_memory_barrier_count = 1,
+                    .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
+                    {
+                        .src_stage_mask = .{
+                            .top_of_pipe_bit = true,
+                        },
+                        .dst_stage_mask = .{
+                            .copy_bit = true,
+                        },
+                        .src_access_mask = .{},
+                        .dst_access_mask = .{ .transfer_write_bit = true, },
+                        .old_layout = .@"undefined",
+                        .new_layout = .transfer_dst_optimal,
+                        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+                        .image = self.handle,
+                        .subresource_range = .{
+                            .aspect_mask = self.aspect_mask,
+                            .base_mip_level = 0,
+                            .level_count = vk.REMAINING_MIP_LEVELS,
+                            .base_array_layer = 0,
+                            .layer_count = vk.REMAINING_ARRAY_LAYERS,
+                        },
+                    }),
+                }
+            );
+
+            command_buffer.end();
+            try command_buffer.submitAndWait();
+        }
     }
 
     return self;
@@ -185,4 +192,52 @@ pub fn deinit(self: *Image) void
     defer Context.self.vkd.destroyImage(Context.self.device, self.handle, &Context.self.allocation_callbacks);
     defer Context.self.vkd.destroyImageView(Context.self.device, self.view, &Context.self.allocation_callbacks);
     defer Context.self.vkd.freeMemory(Context.self.device, self.memory, &Context.self.allocation_callbacks);
+}
+
+pub const View = struct 
+{
+    image: *const Image,
+    handle: vk.ImageView,
+    level: u32,
+    level_count: u32,  
+};
+
+pub fn createView(self: *const Image, level: u32, level_count: u32) !View 
+{
+    var view = View 
+    {
+        .image = self,
+        .handle = .null_handle,
+        .level = level,
+        .level_count = level_count,
+    };
+
+    view.handle = try Context.self.vkd.createImageView(
+        Context.self.device, 
+        &.{
+            .flags = .{},
+            .image = self.handle,
+            .view_type = .@"2d",
+            .format = self.format,
+            .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+            .subresource_range = .{
+                .aspect_mask = self.aspect_mask,
+                .base_mip_level = level,
+                .level_count = level_count,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            },
+        }, 
+        &Context.self.allocation_callbacks
+    );
+    errdefer Context.self.vkd.destroyImageView(Context.self.device, view.handle, &Context.self.allocation_callbacks);
+
+    return view;
+}
+
+pub fn destroyView(self: Image, view: Image.View) void 
+{
+    _ = self;
+    
+    defer Context.self.vkd.destroyImageView(Context.self.device, view.handle, &Context.self.allocation_callbacks);
 }

@@ -217,6 +217,7 @@ pub fn memoryBarrier(self: CommandBuffer, barrier: MemoryBarrier) void
 
 pub const ImageBarrier = struct 
 {
+    layer: u32 = 0,
     source_stage: PipelineStage,
     source_access: ResourceAccess,
     source_layout: vk.ImageLayout = .@"undefined",
@@ -244,7 +245,7 @@ pub fn imageBarrier(
             {
                 .src_stage_mask = getVkPipelineStage(barrier.source_stage),
                 .src_access_mask = getVkResourceAccess(barrier.source_access),
-                .dst_stage_mask = getVkPipelineStage(barrier.source_stage),
+                .dst_stage_mask = getVkPipelineStage(barrier.destination_stage),
                 .dst_access_mask = getVkResourceAccess(barrier.destination_access),
                 .old_layout = barrier.source_layout,
                 .new_layout = barrier.destination_layout,
@@ -253,7 +254,7 @@ pub fn imageBarrier(
                 .image = image.handle,
                 .subresource_range = .{
                     .aspect_mask = image.aspect_mask,
-                    .base_mip_level = 0,
+                    .base_mip_level = barrier.layer,
                     .level_count = vk.REMAINING_MIP_LEVELS,
                     .base_array_layer = 0,
                     .layer_count = vk.REMAINING_ARRAY_LAYERS,
@@ -344,7 +345,7 @@ pub fn submit(self: CommandBuffer, fence: Fence) !void
 pub const Attachment = struct 
 {
     image: *const Image,
-    clear: ?Clear,
+    clear: ?Clear = null,
 
     pub const Clear = union(enum)
     {
@@ -621,6 +622,30 @@ pub fn drawIndexed(
         first_index,
         vertex_offset,
         first_instance,
+    );
+}
+
+pub const DrawIndirectCommand = extern struct 
+{
+    vertex_count: u32,
+    instance_count: u32,
+    first_vertex: u32,
+    first_instance: u32,  
+};
+
+pub fn drawIndirect(
+    self: CommandBuffer,
+    draw_buffer: Buffer,
+    draw_buffer_offset: usize,
+    draw_count: usize,
+) void 
+{
+    Context.self.vkd.cmdDrawIndirect(
+        self.handle, 
+        draw_buffer.handle, 
+        draw_buffer_offset,
+        @truncate(u32, draw_count),
+        @sizeOf(DrawIndirectCommand),
     );
 }
 

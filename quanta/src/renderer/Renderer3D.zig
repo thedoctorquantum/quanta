@@ -10,6 +10,7 @@ const vk = graphics.vulkan;
 const zalgebra = @import("zalgebra");
 
 const cull_comp_spv = @alignCast(4, @embedFile("spirv/cull.comp.spv"));
+const depth_reduce_comp_spv = @alignCast(4, @embedFile("spirv/depth_reduce.comp.spv"));
 
 const tri_vert_spv = @alignCast(4, @embedFile("spirv/tri.vert.spv"));
 const tri_frag_spv = @alignCast(4, @embedFile("spirv/tri.frag.spv"));
@@ -20,6 +21,11 @@ const depth_frag_spv = @alignCast(4, @embedFile("spirv/depth.frag.spv"));
 const ColorPassPushConstants = extern struct 
 {
     view_projection: [4][4]f32,
+};
+
+const DepthReducePushData = extern struct 
+{
+    image_size: [2]f32,
 };
 
 const DrawCullPushConstants = extern struct 
@@ -49,12 +55,14 @@ pub var self: Renderer3D = undefined;
 allocator: std.mem.Allocator,
 swapchain: *graphics.Swapchain,
 depth_image: graphics.Image,
+depth_pyramid: graphics.Image,
+depth_pyramid_levels: []Image.View,
+depth_pyramid_level_count: u32,
 command_buffers: []graphics.CommandBuffer, 
 frame_fence: graphics.Fence,
 
 transfer_command_buffer: graphics.CommandBuffer,
 image_transfer_events: std.ArrayListUnmanaged(graphics.Event),
-// mesh_transfer_events: std.ArrayListUnmanaged(graphics.Event),
 
 image_staging_buffers: std.ArrayListUnmanaged(graphics.Buffer),
 image_staging_fence: graphics.Fence,
@@ -108,6 +116,92 @@ camera: Camera,
 mesh_data_changed: bool,
 material_data_changed: bool,
 
+fn previousPow2(v: u32) u32
+{
+	var r: u32 = 1;
+
+	while (r * 2 < v)
+		r *= 2;
+
+	return r;
+}
+
+fn getImageMipLevels(width: u32, height: u32) u32
+{
+    var current_width = width;
+    var current_height = height;
+
+	var result: u32 = 1;
+
+	while (current_width > 1 or current_height > 1)
+	{
+		result += 1;
+		current_width /= 2;
+		current_height /= 2;
+	}
+
+	return result;
+}
+
+fn initFrameImages(window_width: u32, window_height: u32) !void 
+{
+    const render_width = window_width;
+    const render_height = window_height;
+
+    self.depth_image = try Image.init(
+        render_width, render_height, 1, 1,
+        vk.Format.d32_sfloat, 
+        vk.ImageLayout.attachment_optimal,
+        .{  
+            .depth_stencil_attachment_bit = true,
+            .sampled_bit = true,
+        }
+    );
+    errdefer self.depth_image.deinit();
+
+    const depth_pyramid_width = previousPow2(render_width);
+    const depth_pyramid_height = previousPow2(render_height);
+
+    self.depth_pyramid_level_count = getImageMipLevels(depth_pyramid_width, depth_pyramid_height);
+
+    self.depth_pyramid = try Image.init(
+        depth_pyramid_width, depth_pyramid_height, 1,
+        self.depth_pyramid_level_count,
+        vk.Format.r32_sfloat, 
+        .general,
+        .{
+            .transfer_src_bit = true, 
+            .storage_bit = true, 
+            .sampled_bit = true, 
+        }
+    );
+    errdefer self.depth_pyramid.deinit();
+
+    self.depth_pyramid_levels = try self.allocator.alloc(graphics.Image.View, self.depth_pyramid.levels);
+    errdefer self.allocator.free(self.depth_pyramid_levels);
+
+    for (self.depth_pyramid_levels) |*pyramid_level, i|
+    {
+        pyramid_level.* = try self.depth_pyramid.createView(@intCast(u32, i), 1);
+    }
+
+    errdefer for (self.depth_pyramid_levels) |*pyramid_level|
+    {
+        self.depth_pyramid.destroyView(pyramid_level);
+    };
+}
+
+fn deinitFrameImages() void
+{
+    defer self.depth_image.deinit();
+    defer self.depth_pyramid.deinit();
+    defer self.allocator.free(self.depth_pyramid_levels);
+    defer for (self.depth_pyramid_levels) |pyramid_level|
+    {
+        self.depth_pyramid.destroyView(pyramid_level);
+    };
+}
+
 pub fn init(
     allocator: std.mem.Allocator,
     swapchain: *graphics.Swapchain
@@ -126,8 +220,8 @@ pub fn init(
     self.vertex_staging_buffers = .{};
     self.index_staging_buffers = .{};
 
-    self.depth_image = try Image.init(window.getWidth(), window.getHeight(), 1, vk.Format.d32_sfloat, vk.ImageLayout.attachment_optimal);
-    errdefer self.depth_image.deinit();
+    try initFrameImages(window.getWidth(), window.getHeight());
+    errdefer deinitFrameImages();
 
     self.command_buffers = try allocator.alloc(graphics.CommandBuffer, swapchain.swap_images.len);
     errdefer allocator.free(self.command_buffers);
@@ -146,7 +240,6 @@ pub fn init(
         command_buffer.deinit();
     };
 
-    //Could eventually use the dedicated transfer queue if it's available
     self.transfer_command_buffer = try graphics.CommandBuffer.init(.transfer);
     errdefer self.transfer_command_buffer.deinit();
 
@@ -192,10 +285,10 @@ pub fn init(
 
     self.depth_reduce_pipeline = try graphics.ComputePipeline.init(
         self.allocator, 
-        cull_comp_spv, 
+        depth_reduce_comp_spv, 
         .@"2d",
         null,
-        DrawCullPushConstants
+        DepthReducePushData
     );
     errdefer self.depth_reduce_pipeline.deinit(self.allocator);
 
@@ -245,7 +338,7 @@ pub fn init(
                 .compare_op = .greater,
             },
             .rasterisation_state = .{
-                .polygon_mode = .line,
+                .polygon_mode = .fill,
             },
         },
         null,
@@ -289,7 +382,7 @@ pub fn deinit() void
 {
     defer self = undefined;
     defer self.allocator.free(self.command_buffers);
-    defer self.depth_image.deinit();
+    defer deinitFrameImages();
     defer for (self.command_buffers) |*command_buffer|
     {
         command_buffer.deinit();
@@ -445,7 +538,6 @@ pub fn beginRender(camera: Camera) !void
 
         self.image_staging_fence.reset();
         try self.transfer_command_buffer.submit(self.image_staging_fence);
-
     }
 }
 
@@ -657,7 +749,7 @@ fn endRenderInternal() !void
                     .source_stage = .{ .all_commands = true },
                     .source_access = .{},
                     .destination_stage = .{ .color_attachment_output = true },
-                    .destination_access = .{ .depth_attachment_write = true },
+                    .destination_access = .{ .color_attachment_write = true },
                     .destination_layout = .attachment_optimal,
                 }
             );
@@ -693,19 +785,68 @@ fn endRenderInternal() !void
             );
         }
 
-        command_buffer.memoryBarrier(.{
-            .source_stage = .{ .late_fragment_tests = true },
-            .source_access = .{ .depth_attachment_write = true },
-            .destination_stage = .{ .early_fragment_tests = true },
-            .destination_access = .{ .depth_attachment_read = true },
-        });
-
         //Depth reduce
-        if (false)
+        if (true)
         {
-            command_buffer.setComputePipeline(self.depth_reduce_pipeline);
-            command_buffer.computeDispatch(1, 1, 1);
+            command_buffer.imageBarrier(self.depth_image, .{
+                .source_stage = .{ .late_fragment_tests = true },
+                .source_access = .{ .depth_attachment_write = true },
+                .source_layout = .attachment_optimal,
+                .destination_stage = .{ .compute_shader = true },
+                .destination_access = .{ .shader_read = true },
+                .destination_layout = .shader_read_only_optimal,
+            });
+
+            command_buffer.imageBarrier(self.depth_pyramid, .{
+                .source_stage = .{ .compute_shader = true },
+                .source_access = .{ .shader_read = true },
+                .source_layout = .general,
+                .destination_stage = .{ .compute_shader = true },
+                .destination_access = .{ .shader_write = true },
+                .destination_layout = .general,
+            });
+
+            for (self.depth_pyramid_levels) |_, i|
+            {
+                const pyramid_level_width: u32 = @max(1, self.depth_pyramid.width >> @intCast(u5, i));
+                const pyramid_level_height: u32 = @max(1, self.depth_pyramid.height >> @intCast(u5, i));
+
+                if (i == 0)
+                {
+                    self.depth_reduce_pipeline.setDescriptorImageSampler(1, 0, self.depth_image, self.depth_reduce_sampler);
+                }
+                else 
+                {
+                    self.depth_reduce_pipeline.setDescriptorImageViewSampler(1, 0, self.depth_pyramid_levels[i - 1], self.depth_reduce_sampler);
+                }
+
+                self.depth_reduce_pipeline.setDescriptorImageView(0, 0, self.depth_pyramid_levels[i]);
+
+                command_buffer.setComputePipeline(self.depth_reduce_pipeline);
+
+                command_buffer.setPushData(DepthReducePushData, .{
+                    .image_size = .{ @intToFloat(f32, pyramid_level_width), @intToFloat(f32, pyramid_level_height) }
+                });
+                command_buffer.computeDispatch(pyramid_level_width, pyramid_level_height, 1);
+
+                command_buffer.imageBarrier(self.depth_pyramid, .{
+                    .layer = @intCast(u32, i),
+                    .source_stage = .{ .compute_shader = true },
+                    .source_access = .{ .shader_write = true },
+                    .source_layout = .general,
+                    .destination_stage = .{ .compute_shader = true },
+                    .destination_access = .{ .shader_read = true },
+                    .destination_layout = .general,
+                });
+            }
         }
+
+        // command_buffer.memoryBarrier(.{
+        //     .source_stage = .{ .late_fragment_tests = true },
+        //     .source_access = .{ .depth_attachment_write = true },
+        //     .destination_stage = .{ .early_fragment_tests = true },
+        //     .destination_access = .{ .depth_attachment_read = true },
+        // });
 
         //Post depth per instance cull #1
         {
@@ -949,7 +1090,18 @@ pub fn createMaterial(
 {
     const material_handle = @intCast(u32, self.materials.items.len);
 
-    var albedo_image = try Image.init(albedo_texture_width, albedo_texture_height, 1, .r8g8b8a8_srgb, .shader_read_only_optimal);
+    var albedo_image = try Image.init(
+        albedo_texture_width, 
+        albedo_texture_height, 
+        1, 
+        1,
+        .r8g8b8a8_srgb, 
+        .shader_read_only_optimal,
+        .{
+            .transfer_dst_bit = true, 
+            .sampled_bit = true, 
+        }
+    );
     errdefer albedo_image.deinit();
 
     try self.albedo_images.append(self.allocator, albedo_image);

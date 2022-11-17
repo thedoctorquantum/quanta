@@ -248,6 +248,76 @@ pub fn deinit(self: *ComputePipeline, allocator: std.mem.Allocator) void
     defer Context.self.vkd.destroyPipeline(Context.self.device, self.handle, &Context.self.allocation_callbacks);
 }
 
+pub fn setDescriptorImage(
+    self: *ComputePipeline,    
+    index: u32,
+    array_index: u32,
+    image: Image,
+) void
+{
+    Context.self.vkd.updateDescriptorSets(
+        Context.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = self.descriptor_sets[0],
+                .dst_binding = index,
+                .dst_array_element = array_index,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_image,
+                .p_image_info = &[_]vk.DescriptorImageInfo 
+                {
+                    .{
+                        .sampler = .null_handle,
+                        .image_view = image.view,
+                        .image_layout = image.layout,
+                    }
+                },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        }, 
+        0, 
+        undefined,
+    );
+}
+
+pub fn setDescriptorImageView(
+    self: *ComputePipeline,    
+    index: u32,
+    array_index: u32,
+    image_view: Image.View,
+) void
+{
+    Context.self.vkd.updateDescriptorSets(
+        Context.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = self.descriptor_sets[0],
+                .dst_binding = index,
+                .dst_array_element = array_index,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_image,
+                .p_image_info = &[_]vk.DescriptorImageInfo 
+                {
+                    .{
+                        .sampler = .null_handle,
+                        .image_view = image_view.handle,
+                        .image_layout = .general,
+                    }
+                },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        }, 
+        0, 
+        undefined,
+    );
+}
+
 pub fn setDescriptorImageSampler(
     self: *ComputePipeline,
     index: u32,
@@ -273,6 +343,42 @@ pub fn setDescriptorImageSampler(
                         .sampler = sampler.handle,
                         .image_view = image.view,
                         .image_layout = image.layout,
+                    }
+                },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        }, 
+        0, 
+        undefined,
+    );
+}
+
+pub fn setDescriptorImageViewSampler(
+    self: *ComputePipeline,
+    index: u32,
+    array_index: u32,
+    image_view: Image.View,
+    sampler: Sampler,
+) void 
+{
+    Context.self.vkd.updateDescriptorSets(
+        Context.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = self.descriptor_sets[0],
+                .dst_binding = index,
+                .dst_array_element = array_index,
+                .descriptor_count = 1,
+                .descriptor_type = .combined_image_sampler,
+                .p_image_info = &[_]vk.DescriptorImageInfo 
+                {
+                    .{
+                        .sampler = sampler.handle,
+                        .image_view = image_view.handle,
+                        .image_layout = image_view.image.layout,
                     }
                 },
                 .p_buffer_info = undefined,
