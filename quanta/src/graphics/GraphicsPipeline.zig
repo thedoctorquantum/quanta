@@ -45,11 +45,26 @@ pub const Options = struct
     pub const RasterisationState = struct 
     {
         polygon_mode: PolygonMode = .fill,
+        cull_mode: CullMode = .none,
+        vertex_winding: VertexWinding = .clockwise,
 
         pub const PolygonMode = enum 
         {
             fill,
             line,
+        };
+
+        pub const CullMode = enum 
+        {
+            none,
+            back,
+            front,
+        };
+
+        pub const VertexWinding = enum 
+        {
+            clockwise,
+            counter_clockwise,
         };
     };
 };
@@ -383,8 +398,17 @@ pub fn init(
                         .line => vk.PolygonMode.line,
                     },
                     .line_width = 1,
-                    .cull_mode = .{ .back_bit = true, },
-                    .front_face = .clockwise,
+                    .cull_mode = switch (options.rasterisation_state.cull_mode)
+                    {
+                        .none => vk.CullModeFlags {},
+                        .back => vk.CullModeFlags { .back_bit = true, },
+                        .front => vk.CullModeFlags { .front_bit = true, },
+                    },
+                    .front_face = switch (options.rasterisation_state.vertex_winding)
+                    {
+                        .clockwise => vk.FrontFace.clockwise,
+                        .counter_clockwise => vk.FrontFace.counter_clockwise,
+                    },
                     .depth_bias_enable = vk.FALSE,
                     .depth_bias_constant_factor = 0,
                     .depth_bias_clamp = 0,

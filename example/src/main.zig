@@ -13,7 +13,9 @@ const Sampler = quanta.graphics.Sampler;
 const png = quanta.asset.importers.png;
 const gltf = quanta.asset.importers.gltf;
 const zalgebra = quanta.math.zalgebra;
+const nk = quanta.nuklear.nuklear;
 
+const vk = quanta.graphics.vulkan;
 const graphics = quanta.graphics;
 const Renderer3D = quanta.renderer.Renderer3D;
 const RendererGui = quanta.renderer_gui.RendererGui;
@@ -42,6 +44,26 @@ fn packUnorm4x8(v: [4]f32) u32
         .z = z, 
         .w = w,
     });
+}
+
+fn nkAlloc(_: nk.nk_handle, _: ?*anyopaque, size: nk.nk_size) callconv(.C) ?*anyopaque
+{
+    return std.c.malloc(size);
+}
+
+fn nkFree(_: nk.nk_handle, ptr: ?*anyopaque) callconv(.C) void
+{
+    std.c.free(ptr);
+}
+
+fn nkFontWidth(_ : nk.nk_handle, _: f32, _: [*c]const u8, _: c_int) callconv(.C) f32
+{
+    return 50;
+}
+
+fn nkFontQuery(_: nk.nk_handle, _: f32, _: [*c]nk.struct_nk_user_font_glyph, _: nk.nk_rune, _: nk.nk_rune) callconv(.C) void
+{
+
 }
 
 pub fn main() !void 
@@ -98,8 +120,41 @@ pub fn main() !void
     try Renderer3D.init(allocator, &swapchain);
     defer Renderer3D.deinit();
 
-    try RendererGui.init(allocator);
+    try RendererGui.init(allocator, swapchain);
     defer RendererGui.deinit();
+
+    var nk_ctx: nk.nk_context = std.mem.zeroes(nk.nk_context);
+
+    var nk_allocator = nk.nk_allocator {
+        .userdata = .{ .ptr = null },
+        .alloc = &nkAlloc,
+        .free = &nkFree,
+    };
+
+    var font_atlas: nk.nk_font_atlas = undefined;
+    var font: *nk.nk_font = undefined;
+
+    {
+        var font_atlas_width: c_int = 0;
+        var font_atlas_height: c_int = 0;
+
+        nk.nk_font_atlas_init(&font_atlas, &nk_allocator);
+        nk.nk_font_atlas_begin(&font_atlas);
+        font = nk.nk_font_atlas_add_default(&font_atlas, 13, 0);
+
+        const font_image = nk.nk_font_atlas_bake(&font_atlas, &font_atlas_width, &font_atlas_height, nk.NK_FONT_ATLAS_RGBA32);
+        // device_upload_atlas(&device, image, w, h);
+        const font_texture = try RendererGui.createTexture(
+            @ptrCast([*]const u8, font_image.?)[0..(@intCast(usize, font_atlas_width) * @intCast(usize, font_atlas_height) * @sizeOf(u32))], 
+            @intCast(u32, font_atlas_width), 
+            @intCast(u32, font_atlas_height)
+        );
+
+        nk.nk_font_atlas_end(&font_atlas, nk.nk_handle_id(@intCast(c_int, @enumToInt(font_texture))), null);
+    }
+
+    std.debug.assert(nk.nk_init(&nk_ctx, &nk_allocator, &font.handle) == 1);
+    defer nk.nk_free(&nk_ctx);
 
     const test_scene_file_path = "zig-out/bin/assets/Suzanne";
 
@@ -307,7 +362,7 @@ pub fn main() !void
             if (camera_enable)
             {
                 const sensitivity = 0.1;
-                const camera_speed = @splat(3, @as(f32, 10)) * @splat(3, @intToFloat(f32, delta_time) / 1000);
+                const camera_speed = @splat(3, @as(f32, 5)) * @splat(3, @intToFloat(f32, delta_time) / 1000);
 
                 yaw += x_offset * sensitivity;
                 pitch += y_offset * sensitivity;
@@ -347,7 +402,17 @@ pub fn main() !void
             camera.translation = camera_position;
         }
 
-        //draw
+        const image_index = swapchain.image_index;
+        const image = swapchain.swap_images[image_index];
+
+        //sneaky hack due to our incomplete swapchain abstraction
+        var color_image: Image = undefined;
+
+        color_image.view = image.view;
+        color_image.handle = image.image;
+        color_image.aspect_mask = .{ .color_bit = true };
+
+        //draw scene
         {
             try Renderer3D.beginRender(camera);
             defer Renderer3D.endRender();
@@ -393,6 +458,103 @@ pub fn main() !void
                 // ));
             }
         }
+
+        //nuklear input
+        if (!camera_enable)
+        {
+            nk.nk_input_begin(&nk_ctx);
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_DEL, @boolToInt(window.window.getKey(.delete) == .press));
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_ENTER, @boolToInt(window.window.getKey(.enter) == .press));
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_TAB, @boolToInt(window.window.getKey(.tab) == .press));
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_BACKSPACE, @boolToInt(window.window.getKey(.backspace) == .press));
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_LEFT, @boolToInt(window.window.getKey(.left) == .press));
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_RIGHT, @boolToInt(window.window.getKey(.right) == .press));
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_UP, @boolToInt(window.window.getKey(.up) == .press));
+            nk.nk_input_key(&nk_ctx, nk.NK_KEY_DOWN, @boolToInt(window.window.getKey(.down) == .press));
+
+            if (
+                window.window.getKey(.left_control) == .press or
+                window.window.getKey(.right_control) == .press
+            ) 
+            {
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_COPY, @boolToInt(window.window.getKey(.c) == .press));
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_PASTE, @boolToInt(window.window.getKey(.p) == .press));
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_CUT, @boolToInt(window.window.getKey(.x) == .press));
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_CUT, @boolToInt(window.window.getKey(.e) == .press));
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_SHIFT, 1);
+            } 
+            else 
+            {
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_COPY, 0);
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_PASTE, 0);
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_CUT, 0);
+                nk.nk_input_key(&nk_ctx, nk.NK_KEY_SHIFT, 0);
+            }
+            
+            const cursor_pos = try window.window.getCursorPos();
+            const cursor_x = @floatToInt(i32, cursor_pos.xpos);
+            const cursor_y = @floatToInt(i32, cursor_pos.ypos);
+
+            nk.nk_input_motion(&nk_ctx, cursor_x, cursor_y);
+            nk.nk_input_button(&nk_ctx, nk.NK_BUTTON_LEFT, cursor_x, cursor_y, @boolToInt(window.window.getMouseButton(.left) == .press));
+            nk.nk_input_button(&nk_ctx, nk.NK_BUTTON_MIDDLE, cursor_x, cursor_y, @boolToInt(window.window.getMouseButton(.middle) == .press));
+            nk.nk_input_button(&nk_ctx, nk.NK_BUTTON_RIGHT, cursor_x, cursor_y, @boolToInt(window.window.getMouseButton(.right) == .press));
+            nk.nk_input_end(&nk_ctx);
+        }
+
+        //nuklear
+        {   
+            if (nk.nk_begin(
+                &nk_ctx, 
+                "sus", 
+                nk.nk_rect(10, 10, 220, 220), 
+                nk.NK_WINDOW_BORDER | 
+                nk.NK_WINDOW_MOVABLE | 
+                nk.NK_WINDOW_SCALABLE
+            ) == 1)
+            {
+                nk.nk_layout_row_static(&nk_ctx, 30, 80, 1);
+
+                if (nk.nk_button_label(&nk_ctx, "button") == 1) 
+                {
+                    //* event handling */
+                    std.log.info("pressed button: {s}", .{ @src().file });
+                }
+
+                _ = nk.nk_slider_float(&nk_ctx, 10, &camera.fov, 90, 0.1);
+
+                _ = nk.nk_button_color(&nk_ctx, .{ .r = 255, .b = 255, .g = 0, .a = 255 });
+            }
+            nk.nk_end(&nk_ctx);
+        }
+
+        //draw gui
+        if (true)
+        {
+            RendererGui.begin(&color_image);
+            defer RendererGui.end(&nk_ctx) catch unreachable;
+        }
+
+        nk.nk_clear(&nk_ctx);
+
+        _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{.wait_semaphore_count = 1,
+            .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &image.render_finished),
+            .swapchain_count = 1,
+            .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &swapchain.handle),
+            .p_image_indices = @ptrCast([*]const u32, &image_index),
+            .p_results = null,
+        });
+
+        const result = try GraphicsContext.self.vkd.acquireNextImageKHR(
+            GraphicsContext.self.device,
+            swapchain.handle,
+            std.math.maxInt(u64),
+            swapchain.next_image_acquired,
+            .null_handle,
+        );
+
+        std.mem.swap(vk.Semaphore, &swapchain.swap_images[result.image_index].image_acquired, &swapchain.next_image_acquired);
+        swapchain.image_index = result.image_index;
     }
 
     try GraphicsContext.self.vkd.deviceWaitIdle(GraphicsContext.self.device);

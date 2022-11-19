@@ -23,11 +23,13 @@ pub fn initData(
     width: u32,
     height: u32,
     depth: u32,
+    levels: u32,
     format: vk.Format,
     layout: vk.ImageLayout,
+    usage: vk.ImageUsageFlags,
 ) !Image
 {
-    var image = try init(width, height, depth, format, layout);
+    var image = try init(width, height, depth, levels, format, layout, usage);
     errdefer image.deinit();
 
     var source_buffer = try Buffer.init(image.size, .staging);

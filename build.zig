@@ -63,6 +63,7 @@ fn buildQuanta(builder: *std.build.Builder, exe: *std.build.LibExeObjStep) !void
     _ = builder;
 
     exe.addCSourceFile("quanta/src/asset/importers/cgltf.c", &[_][]const u8 {});
+    exe.force_pic = true;
 
     {
         var package = std.build.Pkg 
@@ -85,6 +86,8 @@ fn buildQuanta(builder: *std.build.Builder, exe: *std.build.LibExeObjStep) !void
         };
 
         exe.addPackage(package);
+        exe.addIncludePath("quanta/lib/Nuklear/");
+        exe.addCSourceFile("quanta/src/nuklear/nuklear.c", &[_][]const u8 {});
 
         try glfw.link(exe.builder, exe, .{});
     }
@@ -137,6 +140,8 @@ pub fn build(builder: *std.build.Builder) !void
 
         try compileShader(builder, mode, "vert", "quanta/src/renderer_gui/rectangle.vert.glsl", "quanta/src/renderer_gui/spirv/rectangle.vert.spv");
         try compileShader(builder, mode, "frag", "quanta/src/renderer_gui/rectangle.frag.glsl", "quanta/src/renderer_gui/spirv/rectangle.frag.spv");
+        try compileShader(builder, mode, "vert", "quanta/src/renderer_gui/mesh.vert.glsl", "quanta/src/renderer_gui/spirv/mesh.vert.spv");
+        try compileShader(builder, mode, "frag", "quanta/src/renderer_gui/mesh.frag.glsl", "quanta/src/renderer_gui/spirv/mesh.frag.spv");
 
         const run_cmd = exe.run();
         run_cmd.step.dependOn(builder.getInstallStep());

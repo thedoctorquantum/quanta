@@ -4,6 +4,7 @@ const std = @import("std");
 const vk = @import("vk.zig");
 const window = @import("../windowing.zig").window;
 const glfw = @import("glfw");
+const log = @import("../log.zig").log;
 
 pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
@@ -145,17 +146,17 @@ fn debugUtilsMessengerCallback(
 
     if (message_severity.error_bit_ext)
     {
-        std.log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
         std.os.exit(0);
     }
     else if (message_severity.warning_bit_ext)
     {
-        std.log.warn("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        log.warn("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
         std.os.exit(0);
     }
     else
     {
-        std.log.debug("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        log.debug("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
     }
 
     return vk.FALSE;
@@ -296,8 +297,8 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
     instance_extentions = instance_extentions ++ [_][*:0]const u8 { vk.extension_info.khr_surface.name };
     instance_extentions = instance_extentions ++ [_][*:0]const u8 { vk.extension_info.khr_xcb_surface.name };
 
-    std.log.info("Vulkan Version: {}", .{ vulkan_version });
-    std.log.info("Vulkan Instance Extentions: {s}", .{ instance_extentions });
+    log.info("Vulkan Version: {}", .{ vulkan_version });
+    log.info("Vulkan Instance Extentions: {s}", .{ instance_extentions });
 
     comptime var requested_layers: []const [*:0]const u8 = &.{};
 
@@ -312,7 +313,7 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         requested_layers = requested_layers ++ &[_][*:0]const u8 { "VK_LAYER_KHRONOS_synchronization2" }; 
     }
 
-    std.log.info("layers: {s}", .{ requested_layers });
+    log.info("layers: {s}", .{ requested_layers });
 
     var layers_array: [requested_layers.len][*:0]const u8 = undefined; 
     var layers: [][*:0]const u8 = layers_array[0..0]; 
@@ -328,11 +329,11 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
         _ = try self.vkb.enumerateInstanceLayerProperties(&layer_count, layer_properties.ptr);
 
-        std.log.info("Available Layers:", .{});
+        log.info("Available Layers:", .{});
 
         for (layer_properties) |layer_property|
         {
-            std.log.info("  {s}", .{ layer_property.layer_name });
+            log.info("  {s}", .{ layer_property.layer_name });
         }
 
         inline for (requested_layers) |layer|
@@ -357,7 +358,7 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
             }
             else
             {
-                std.log.err("Failed to find layer {s}", .{ layer });
+                log.err("Failed to find layer {s}", .{ layer });
             }
         }
     }
@@ -474,14 +475,14 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         .shader_draw_parameters = vk.TRUE,
     };
 
-    std.log.info("Required device extensions: {s}", .{ device_extentions });
-    std.log.info("Required device features:", .{});
+    log.info("Required device extensions: {s}", .{ device_extentions });
+    log.info("Required device features:", .{});
 
     inline for ((comptime std.meta.fieldNames(@TypeOf(device_vulkan13_features))[2..])) |feature_name|
     {
         if (@field(device_vulkan13_features, feature_name) == vk.TRUE)
         {
-            std.log.info("  {s}", .{ feature_name });
+            log.info("  {s}", .{ feature_name });
         }
     }
 
@@ -498,13 +499,13 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
         var found_suitable_device = false;
 
-        std.log.info("Available devices:", .{});
+        log.info("Available devices:", .{});
 
         for (physical_devices) |physical_device, i|
         {
             const properties = self.vki.getPhysicalDeviceProperties(physical_device);
 
-            std.log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
+            log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
                 i, 
                 properties.device_name, 
                 vk.apiVersionMajor(properties.api_version), 
@@ -519,7 +520,7 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
             self.physical_device_properties = self.vki.getPhysicalDeviceProperties(physical_device);
             self.physical_device_features = self.vki.getPhysicalDeviceFeatures(physical_device);
 
-            std.log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
+            log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
                 i, 
                 self.physical_device_properties.device_name, 
                 vk.apiVersionMajor(self.physical_device_properties.api_version), 
@@ -595,13 +596,13 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
                     }
                 } else
                 {
-                    std.log.info("Device {s} doesn't support required extention {s}", .{ self.physical_device_properties.device_name, required_extention });
+                    log.info("Device {s} doesn't support required extention {s}", .{ self.physical_device_properties.device_name, required_extention });
 
                     break: block false;
                 }
             } else false;
 
-            std.log.info("  supports_swapchain: {}", .{ supports_extentions });
+            log.info("  supports_swapchain: {}", .{ supports_extentions });
 
             self.physical_device_memory_properties = self.vki.getPhysicalDeviceMemoryProperties(physical_device);
             self.surface_capabilities = try self.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, self.surface);
@@ -641,7 +642,7 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
             for (surface_present_modes) |surface_present_mode|
             {
-                std.log.info("  surface_present_mode: {}", .{ surface_present_mode });
+                log.info("  surface_present_mode: {}", .{ surface_present_mode });
 
                 if (surface_present_mode == .mailbox_khr or surface_present_mode == .fifo_khr)
                 {
@@ -692,10 +693,10 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
             },
         };
 
-        std.log.info("self.graphics_family_index = {?}", .{ self.graphics_family_index });
-        std.log.info("self.present_family_index = {?}", .{ self.present_family_index });
-        std.log.info("self.compute_family_index = {?}", .{ self.compute_family_index });
-        std.log.info("self.transfer_family_index = {?}", .{ self.transfer_family_index });
+        log.info("self.graphics_family_index = {?}", .{ self.graphics_family_index });
+        log.info("self.present_family_index = {?}", .{ self.present_family_index });
+        log.info("self.compute_family_index = {?}", .{ self.compute_family_index });
+        log.info("self.transfer_family_index = {?}", .{ self.transfer_family_index });
 
         var physical_device_features: vk.PhysicalDeviceFeatures2 = .{
             .p_next = &device_vulkan11_features,

@@ -317,7 +317,8 @@ pub fn init(
                 .compare_op = .greater_or_equal,
             },
             .rasterisation_state = .{
-                .polygon_mode = .line,
+                .polygon_mode = .fill,
+                .cull_mode = .back,
             },
         },
         null,
@@ -339,6 +340,7 @@ pub fn init(
             },
             .rasterisation_state = .{
                 .polygon_mode = .fill,
+                .cull_mode = .back,
             },
         },
         null,
@@ -947,25 +949,6 @@ fn endRenderInternal() !void
             },
         }
     }, self.frame_fence.handle);
-
-    _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{.wait_semaphore_count = 1,
-        .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &image.render_finished),
-        .swapchain_count = 1,
-        .p_swapchains = @ptrCast([*]const vk.SwapchainKHR, &self.swapchain.handle),
-        .p_image_indices = @ptrCast([*]const u32, &image_index),
-        .p_results = null,
-    });
-
-    const result = try GraphicsContext.self.vkd.acquireNextImageKHR(
-        GraphicsContext.self.device,
-        self.swapchain.handle,
-        std.math.maxInt(u64),
-        self.swapchain.next_image_acquired,
-        .null_handle,
-    );
-
-    std.mem.swap(vk.Semaphore, &self.swapchain.swap_images[result.image_index].image_acquired, &self.swapchain.next_image_acquired);
-    self.swapchain.image_index = result.image_index;
 
     self.frame_fence.wait();
     self.frame_fence.reset();

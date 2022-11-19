@@ -360,7 +360,7 @@ pub fn beginRenderPass(
     offset_y: i32,
     width: u32,
     height: u32,
-    color_attachments: []Attachment, 
+    color_attachments: []const Attachment, 
     depth_attachment: ?Attachment
 ) void 
 {
