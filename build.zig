@@ -22,7 +22,8 @@ fn compileShaderSpecialized(builder: *std.build.Builder, comptime mode: std.buil
 
     const shader_optimisation = switch (mode)
     {
-        .ReleaseFast => "-O",
+        //TODO: -O causes a crash in our spirv parsing code 
+        .ReleaseFast => "-O0",
         .ReleaseSafe => "-O",
         .ReleaseSmall => "-Os",
         .Debug => "-O0",
@@ -41,7 +42,7 @@ fn compileShaderSpecialized(builder: *std.build.Builder, comptime mode: std.buil
         shader_optimisation, 
     };
 
-    if (mode == .Debug)
+    if (mode == .Debug or true)
     {
         args = args ++ &[_][]const u8 
         {

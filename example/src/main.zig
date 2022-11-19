@@ -66,6 +66,15 @@ fn nkFontQuery(_: nk.nk_handle, _: f32, _: [*c]nk.struct_nk_user_font_glyph, _: 
 
 }
 
+fn nkTextFormat(ctx: *nk.nk_context, comptime format: []const u8, args: anytype) void 
+{
+    var format_buf: [4096]u8 = undefined;
+
+    const text = std.fmt.bufPrint(&format_buf, format, args) catch "";
+
+    nk.nk_text(ctx, text.ptr, @intCast(c_int, text.len), nk.NK_TEXT_ALIGN_LEFT);
+}
+
 pub fn main() !void 
 {
     std.log.debug("All your {s} are belong to us.", .{ "codebase" });
@@ -284,11 +293,9 @@ pub fn main() !void
     //     .{ 1, 1, 1, 1 }
     // );
 
-    const time_start = std.time.milliTimestamp();
+    const target_frame_time: f32 = 16; 
 
-    const target_frame_time: i64 = 16; 
-
-    var delta_time: i64 = target_frame_time;
+    var delta_time: f32 = target_frame_time;
 
     var camera = Renderer3D.Camera
     {
@@ -310,22 +317,7 @@ pub fn main() !void
 
     while (!window.shouldClose())
     {
-        const time_begin = std.time.milliTimestamp();
-
-        defer 
-        {
-            delta_time = std.time.milliTimestamp() - time_begin;
-            
-            if (delta_time < target_frame_time)
-            {
-                //Slow down the game loop
-                // std.time.sleep(@intCast(u64, (target_frame_time - delta_time) * std.time.ns_per_ms));
-            }
-        }
-
-        const time = std.time.milliTimestamp() - time_start;
-
-        _ = time;
+        const time_begin = std.time.nanoTimestamp();
 
         if (!camera_enable_changed and window.window.getKey(.tab) == .press)
         {
@@ -362,7 +354,7 @@ pub fn main() !void
             if (camera_enable)
             {
                 const sensitivity = 0.1;
-                const camera_speed = @splat(3, @as(f32, 5)) * @splat(3, @intToFloat(f32, delta_time) / 1000);
+                const camera_speed = @splat(3, @as(f32, 5)) * @splat(3, delta_time / 1000);
 
                 yaw += x_offset * sensitivity;
                 pitch += y_offset * sensitivity;
@@ -510,10 +502,13 @@ pub fn main() !void
                 nk.nk_rect(10, 10, 220, 220), 
                 nk.NK_WINDOW_BORDER | 
                 nk.NK_WINDOW_MOVABLE | 
-                nk.NK_WINDOW_SCALABLE
+                nk.NK_WINDOW_SCALABLE |
+                nk.NK_WINDOW_CLOSABLE |
+                nk.NK_WINDOW_MINIMIZABLE
             ) == 1)
             {
-                nk.nk_layout_row_static(&nk_ctx, 30, 80, 1);
+                // nk.nk_layout_row_static(&nk_ctx, 30, 80, 1);
+                nk.nk_layout_row_dynamic(&nk_ctx, 30, 1);
 
                 if (nk.nk_button_label(&nk_ctx, "button") == 1) 
                 {
@@ -522,6 +517,10 @@ pub fn main() !void
                 }
 
                 _ = nk.nk_slider_float(&nk_ctx, 10, &camera.fov, 90, 0.1);
+
+                nkTextFormat(&nk_ctx, "Frame time {d:.2}", .{ delta_time });
+                nkTextFormat(&nk_ctx, "Hello, world!", .{});
+                nkTextFormat(&nk_ctx, "Welcome to sus land, the home of all things sus", .{});
 
                 _ = nk.nk_button_color(&nk_ctx, .{ .r = 255, .b = 255, .g = 0, .a = 255 });
             }
@@ -555,6 +554,16 @@ pub fn main() !void
 
         std.mem.swap(vk.Semaphore, &swapchain.swap_images[result.image_index].image_acquired, &swapchain.next_image_acquired);
         swapchain.image_index = result.image_index;
+
+        {
+            delta_time = @intToFloat(f32, std.time.nanoTimestamp() - time_begin) / @intToFloat(f32, std.time.ns_per_ms);
+            
+            // if (delta_time < target_frame_time)
+            // {
+            //     //Slow down the game loop
+            //     // std.time.sleep(@intCast(u64, (target_frame_time - delta_time) * std.time.ns_per_ms));
+            // }
+        }
     }
 
     try GraphicsContext.self.vkd.deviceWaitIdle(GraphicsContext.self.device);

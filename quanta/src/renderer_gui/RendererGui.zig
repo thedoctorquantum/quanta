@@ -53,7 +53,7 @@ pub fn createTexture(data: []const u8, width: u32, height: u32) !TextureHandle
         height, 
         1, 
         1,
-        .r8g8b8a8_srgb, 
+        .r8g8b8a8_srgb,
         .shader_read_only_optimal,
         .{
             .transfer_dst_bit = true, 
@@ -281,6 +281,8 @@ pub fn end(nk_ctx: *nk.nk_context) !void
 
                 while (cmd) |command|
                 {
+                    defer cmd = nk.nk__draw_next(cmd, &nk_commands, nk_ctx);
+                    
                     if (command.elem_count == 0) continue;
 
                     self.command_buffer.setPushData(MeshPipelinePushData, .{
@@ -296,8 +298,6 @@ pub fn end(nk_ctx: *nk.nk_context) !void
                     );
                     self.command_buffer.drawIndexed(command.elem_count, 1, index_offset, 0, 0);
                     index_offset += command.elem_count;
-
-                    cmd = nk.nk__draw_next(cmd, &nk_commands, nk_ctx);
                 }
             }
 

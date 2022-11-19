@@ -36,12 +36,4 @@ void main()
     }
 
     out_color = in_data.color * texture_sample;
-
-    // if (texture_sample.a > 0.1)
-    // {
-        // out_color = in_data.color * texture_sample;
-    // }
-    // {
-        // discard;
-    // }
 }
