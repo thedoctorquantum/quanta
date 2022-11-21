@@ -14,6 +14,7 @@ const png = quanta.asset.importers.png;
 const gltf = quanta.asset.importers.gltf;
 const zalgebra = quanta.math.zalgebra;
 const nk = quanta.nuklear.nuklear;
+const imgui = quanta.imgui.cimgui;
 
 const vk = quanta.graphics.vulkan;
 const graphics = quanta.graphics;
@@ -68,9 +69,9 @@ fn nkFontQuery(_: nk.nk_handle, _: f32, _: [*c]nk.struct_nk_user_font_glyph, _: 
 
 fn nkTextFormat(ctx: *nk.nk_context, comptime format: []const u8, args: anytype) void 
 {
-    var format_buf: [4096]u8 = undefined;
+    var format_buf: [4096 * 8]u8 = undefined;
 
-    const text = std.fmt.bufPrint(&format_buf, format, args) catch "";
+    const text = std.fmt.bufPrint(&format_buf, format, args) catch unreachable;
 
     nk.nk_text(ctx, text.ptr, @intCast(c_int, text.len), nk.NK_TEXT_ALIGN_LEFT);
 }
@@ -129,41 +130,14 @@ pub fn main() !void
     try Renderer3D.init(allocator, &swapchain);
     defer Renderer3D.deinit();
 
+    std.debug.assert(imgui.igCreateContext(null) != null);
+    defer imgui.igDestroyContext(imgui.igGetCurrentContext());
+
+    try quanta.imgui.driver.init();
+    defer quanta.imgui.driver.deinit();
+
     try RendererGui.init(allocator, swapchain);
     defer RendererGui.deinit();
-
-    var nk_ctx: nk.nk_context = std.mem.zeroes(nk.nk_context);
-
-    var nk_allocator = nk.nk_allocator {
-        .userdata = .{ .ptr = null },
-        .alloc = &nkAlloc,
-        .free = &nkFree,
-    };
-
-    var font_atlas: nk.nk_font_atlas = undefined;
-    var font: *nk.nk_font = undefined;
-
-    {
-        var font_atlas_width: c_int = 0;
-        var font_atlas_height: c_int = 0;
-
-        nk.nk_font_atlas_init(&font_atlas, &nk_allocator);
-        nk.nk_font_atlas_begin(&font_atlas);
-        font = nk.nk_font_atlas_add_default(&font_atlas, 13, 0);
-
-        const font_image = nk.nk_font_atlas_bake(&font_atlas, &font_atlas_width, &font_atlas_height, nk.NK_FONT_ATLAS_RGBA32);
-        // device_upload_atlas(&device, image, w, h);
-        const font_texture = try RendererGui.createTexture(
-            @ptrCast([*]const u8, font_image.?)[0..(@intCast(usize, font_atlas_width) * @intCast(usize, font_atlas_height) * @sizeOf(u32))], 
-            @intCast(u32, font_atlas_width), 
-            @intCast(u32, font_atlas_height)
-        );
-
-        nk.nk_font_atlas_end(&font_atlas, nk.nk_handle_id(@intCast(c_int, @enumToInt(font_texture))), null);
-    }
-
-    std.debug.assert(nk.nk_init(&nk_ctx, &nk_allocator, &font.handle) == 1);
-    defer nk.nk_free(&nk_ctx);
 
     const test_scene_file_path = "zig-out/bin/assets/Suzanne";
 
@@ -413,128 +387,31 @@ pub fn main() !void
             {
                 Renderer3D.drawMesh(test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
             }
-
-            // const y_offset = std.math.sin(@intToFloat(f32, time) * 0.001);
-
-            if (false)
-            {
-                var i: isize = 0;
-
-                const mesh_square_size = 10;
-
-                while (i < mesh_square_size) : (i += 1)
-                {
-                    var j: isize = 0;
-
-                    while (j < mesh_square_size) : (j += 1)
-                    {
-                            // Renderer3D.drawMesh(if (@rem(i, 2) == 0) triangle_mesh else triangle_mesh, if (@rem(i, 2) == 0) material else material2, quanta.math.zalgebra.Mat4.fromTranslate(
-                            // .{  
-                                // .data = .{ 5 + @intToFloat(f32, -1 * i * 10), 0.5 + y_offset + @intToFloat(f32, (i + j * mesh_square_size)) / 100, @intToFloat(f32, -1 * j * 10) }
-                            // }
-                        // ));
-                    }
-                }
-
-                // Renderer3D.drawMesh(triangle_mesh, material, quanta.math.zalgebra.Mat4.fromTranslate(
-                    // .{  
-                        // .data = .{ 0, y_offset, 0 }
-                    // }
-                // ));
-
-                // Renderer3D.drawMesh(second_mesh, material2, quanta.math.zalgebra.Mat4.fromRotation(
-                    // y_offset * 60,
-                    // .{  
-                        // .data = .{ 1, 0, 0 }
-                    // }
-                // ));
-            }
         }
 
-        //nuklear input
-        if (!camera_enable)
+        //imgui gui
         {
-            nk.nk_input_begin(&nk_ctx);
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_DEL, @boolToInt(window.window.getKey(.delete) == .press));
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_ENTER, @boolToInt(window.window.getKey(.enter) == .press));
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_TAB, @boolToInt(window.window.getKey(.tab) == .press));
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_BACKSPACE, @boolToInt(window.window.getKey(.backspace) == .press));
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_LEFT, @boolToInt(window.window.getKey(.left) == .press));
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_RIGHT, @boolToInt(window.window.getKey(.right) == .press));
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_UP, @boolToInt(window.window.getKey(.up) == .press));
-            nk.nk_input_key(&nk_ctx, nk.NK_KEY_DOWN, @boolToInt(window.window.getKey(.down) == .press));
+            try quanta.imgui.driver.begin();
+            defer quanta.imgui.driver.end();
 
-            if (
-                window.window.getKey(.left_control) == .press or
-                window.window.getKey(.right_control) == .press
-            ) 
+            imgui.igNewFrame();
+
+            imgui.igShowDemoWindow(null);
+
+            if (quanta.imgui.widgets.begin("lol"))
             {
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_COPY, @boolToInt(window.window.getKey(.c) == .press));
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_PASTE, @boolToInt(window.window.getKey(.p) == .press));
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_CUT, @boolToInt(window.window.getKey(.x) == .press));
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_CUT, @boolToInt(window.window.getKey(.e) == .press));
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_SHIFT, 1);
-            } 
-            else 
-            {
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_COPY, 0);
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_PASTE, 0);
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_CUT, 0);
-                nk.nk_input_key(&nk_ctx, nk.NK_KEY_SHIFT, 0);
+                quanta.imgui.widgets.textFormat("Frame time {d:.2}", .{ delta_time });
             }
-            
-            const cursor_pos = try window.window.getCursorPos();
-            const cursor_x = @floatToInt(i32, cursor_pos.xpos);
-            const cursor_y = @floatToInt(i32, cursor_pos.ypos);
+            quanta.imgui.widgets.end();
 
-            nk.nk_input_motion(&nk_ctx, cursor_x, cursor_y);
-            nk.nk_input_button(&nk_ctx, nk.NK_BUTTON_LEFT, cursor_x, cursor_y, @boolToInt(window.window.getMouseButton(.left) == .press));
-            nk.nk_input_button(&nk_ctx, nk.NK_BUTTON_MIDDLE, cursor_x, cursor_y, @boolToInt(window.window.getMouseButton(.middle) == .press));
-            nk.nk_input_button(&nk_ctx, nk.NK_BUTTON_RIGHT, cursor_x, cursor_y, @boolToInt(window.window.getMouseButton(.right) == .press));
-            nk.nk_input_end(&nk_ctx);
+            imgui.igRender();
         }
 
-        //nuklear
-        {   
-            if (nk.nk_begin(
-                &nk_ctx, 
-                "sus", 
-                nk.nk_rect(10, 10, 220, 220), 
-                nk.NK_WINDOW_BORDER | 
-                nk.NK_WINDOW_MOVABLE | 
-                nk.NK_WINDOW_SCALABLE |
-                nk.NK_WINDOW_CLOSABLE |
-                nk.NK_WINDOW_MINIMIZABLE
-            ) == 1)
-            {
-                // nk.nk_layout_row_static(&nk_ctx, 30, 80, 1);
-                nk.nk_layout_row_dynamic(&nk_ctx, 30, 1);
-
-                if (nk.nk_button_label(&nk_ctx, "button") == 1) 
-                {
-                    //* event handling */
-                    std.log.info("pressed button: {s}", .{ @src().file });
-                }
-
-                _ = nk.nk_slider_float(&nk_ctx, 10, &camera.fov, 90, 0.1);
-
-                nkTextFormat(&nk_ctx, "Frame time {d:.2}", .{ delta_time });
-                nkTextFormat(&nk_ctx, "Hello, world!", .{});
-                nkTextFormat(&nk_ctx, "Welcome to sus land, the home of all things sus", .{});
-
-                _ = nk.nk_button_color(&nk_ctx, .{ .r = 255, .b = 255, .g = 0, .a = 255 });
-            }
-            nk.nk_end(&nk_ctx);
-        }
-
-        //draw gui
-        if (true)
+        //draw imgui
         {
             RendererGui.begin(&color_image);
-            defer RendererGui.end(&nk_ctx) catch unreachable;
+            RendererGui.renderImGuiDrawData(imgui.igGetDrawData()) catch unreachable;
         }
-
-        nk.nk_clear(&nk_ctx);
 
         _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{.wait_semaphore_count = 1,
             .p_wait_semaphores = @ptrCast([*]const vk.Semaphore, &image.render_finished),
@@ -557,12 +434,6 @@ pub fn main() !void
 
         {
             delta_time = @intToFloat(f32, std.time.nanoTimestamp() - time_begin) / @intToFloat(f32, std.time.ns_per_ms);
-            
-            // if (delta_time < target_frame_time)
-            // {
-            //     //Slow down the game loop
-            //     // std.time.sleep(@intCast(u64, (target_frame_time - delta_time) * std.time.ns_per_ms));
-            // }
         }
     }
 

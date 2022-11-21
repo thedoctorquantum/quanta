@@ -8,12 +8,10 @@ const Image = graphics.Image;
 const Sampler = graphics.Sampler;
 const vk = graphics.vulkan;
 const zalgebra = @import("zalgebra");
+const options = @import("options");
 
 const cull_comp_spv = @alignCast(4, @embedFile("spirv/cull.comp.spv"));
 const depth_reduce_comp_spv = @alignCast(4, @embedFile("spirv/depth_reduce.comp.spv"));
-
-const tri_vert_spv = @alignCast(4, @embedFile("spirv/tri.vert.spv"));
-const tri_frag_spv = @alignCast(4, @embedFile("spirv/tri.frag.spv"));
 
 const depth_vert_spv = @alignCast(4, @embedFile("spirv/depth.vert.spv"));
 const depth_frag_spv = @alignCast(4, @embedFile("spirv/depth.frag.spv"));
@@ -115,6 +113,8 @@ camera: Camera,
 
 mesh_data_changed: bool,
 material_data_changed: bool,
+
+statistics: Statistics,
 
 fn previousPow2(v: u32) u32
 {
@@ -309,8 +309,8 @@ pub fn init(
                 swapchain.surface_format.format,
             },
             .depth_attachment_format = self.depth_image.format,
-            .vertex_shader_binary = tri_vert_spv,
-            .fragment_shader_binary = tri_frag_spv,
+            .vertex_shader_binary = @alignCast(4, @import("renderer_shaders").tri_vert_spv),
+            .fragment_shader_binary = @alignCast(4, @embedFile(options.renderer_tri_frag_spv_path)),
             .depth_state = .{
                 .write_enabled = false,
                 .test_enabled = true,
@@ -1157,4 +1157,15 @@ pub fn drawMesh(
     self.material_indices[self.draw_index] = @enumToInt(material);
 
     self.draw_index += 1;
+}
+
+pub const Statistics = struct 
+{
+    vertex_shader_invocations: u32,
+    fragment_shader_invocations: u32,
+};
+
+pub fn getStatistics() Statistics
+{
+    return self.statistics;
 }

@@ -25,10 +25,10 @@ void main()
     {
         texture_sample = texture(textures[nonuniformEXT(push_constants.texture_index - 1)], in_data.uv);
 
-        if (texture_sample.a < 0.5)
-        {
-            discard;
-        }
+        // if (texture_sample.a < 0.5)
+        // {
+            // discard;
+        // }
     }
     else 
     {

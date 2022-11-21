@@ -5,6 +5,7 @@ const graphics = @import("../graphics.zig");
 const window = @import("../windowing.zig").window;
 const nk = @import("../nuklear.zig").nuklear;
 const zalgebra = @import("../math.zig").zalgebra;
+const imgui = @import("../imgui.zig").cimgui;
 
 var self: @This() = .{};
 
@@ -40,6 +41,10 @@ rectangles_buffer: graphics.Buffer = undefined,
 vertices_buffer: graphics.Buffer = undefined,
 indices_buffer: graphics.Buffer = undefined,
 textures: std.ArrayListUnmanaged(Texture) = .{},
+
+nk_commands: nk.nk_buffer = undefined,
+nk_vertices: nk.nk_buffer = undefined,
+nk_indices: nk.nk_buffer = undefined,
 
 pub const TextureHandle = enum(u32) { null = 0, _ };
 
@@ -109,6 +114,9 @@ pub fn init(allocator: std.mem.Allocator, swapchain: graphics.Swapchain) !void
             .rasterisation_state = .{
                 .polygon_mode = .fill,
             },
+            .blend_state = .{
+                .blend_enabled = true,
+            },
         },
         null, 
         MeshPipelinePushData,
@@ -133,6 +141,42 @@ pub fn init(allocator: std.mem.Allocator, swapchain: graphics.Swapchain) !void
 
     self.indices_buffer = try graphics.Buffer.init(max_indices * @sizeOf(u16), .index);
     errdefer self.indices_buffer.deinit();
+
+    nk.nk_buffer_init(&self.nk_commands, &nk_allocator, 4096 * 10);
+    std.debug.assert(self.nk_commands.memory.ptr != null);
+    errdefer nk.nk_buffer_free(&self.nk_commands);
+
+    nk.nk_buffer_init(&self.nk_vertices, &nk_allocator, 4096 * 10);
+    std.debug.assert(self.nk_vertices.memory.ptr != null);
+    errdefer nk.nk_buffer_free(&self.nk_vertices);
+
+    nk.nk_buffer_init(&self.nk_indices, &nk_allocator, 4096 * 10);
+    std.debug.assert(self.nk_indices.memory.ptr != null);
+    errdefer nk.nk_buffer_free(&self.nk_indices);
+    
+    try initImGui();
+    errdefer deinitImGui();
+}
+
+fn initImGui() !void
+{
+    const io: *imgui.ImGuiIO = @ptrCast(*imgui.ImGuiIO, imgui.igGetIO());
+
+    var pixel_pointer: [*c]u8 = undefined;
+    var width: c_int = 0;
+    var height: c_int = 0;
+    var out_bytes_per_pixel: c_int = 0;
+
+    imgui.ImFontAtlas_GetTexDataAsRGBA32(io.Fonts, &pixel_pointer, &width, &height, &out_bytes_per_pixel);
+
+    const font_texture = try createTexture(pixel_pointer[0..@intCast(u32, width) * @intCast(u32, height) * @sizeOf(u32)], @intCast(u32, width), @intCast(u32, height));
+
+    io.Fonts.*.TexID = @intToPtr(*anyopaque, @enumToInt(font_texture));
+}
+
+fn deinitImGui() void 
+{
+
 }
 
 pub fn deinit() void 
@@ -151,6 +195,10 @@ pub fn deinit() void
         defer texture.image.deinit();
         defer texture.sampler.deinit();
     };
+    defer nk.nk_buffer_free(&self.nk_commands);
+    defer nk.nk_buffer_free(&self.nk_vertices);
+    defer nk.nk_buffer_free(&self.nk_indices);
+    defer deinitImGui();
 }
 
 pub fn begin(color_target_image: *const graphics.Image) void 
@@ -184,29 +232,14 @@ var nk_allocator = nk.nk_allocator
     .free = &nkFree,
 };
 
+//impl for nuklear
 pub fn end(nk_ctx: *nk.nk_context) !void 
 {
     {
         try self.command_buffer.begin();
         defer self.command_buffer.end();
 
-        //pub extern fn nk_convert([*c]struct_nk_context, cmds: [*c]struct_nk_buffer, vertices: [*c]struct_nk_buffer, elements: [*c]struct_nk_buffer, [*c]const struct_nk_convert_config) nk_flags;
-
-        var nk_commands: nk.nk_buffer = undefined;
-        var nk_vertices: nk.nk_buffer = undefined;
-        var nk_indices: nk.nk_buffer = undefined;
-
-        nk.nk_buffer_init(&nk_commands, &nk_allocator, 4096 * 10);
-        std.debug.assert(nk_commands.memory.ptr != null);
-        defer nk.nk_buffer_free(&nk_commands);
-        nk.nk_buffer_init(&nk_vertices, &nk_allocator, 4096 * 10);
-        std.debug.assert(nk_vertices.memory.ptr != null);
-        defer nk.nk_buffer_free(&nk_vertices);
-        nk.nk_buffer_init(&nk_indices, &nk_allocator, 4096 * 10);
-        std.debug.assert(nk_indices.memory.ptr != null);
-        defer nk.nk_buffer_free(&nk_indices);
-
-        std.debug.assert(nk.nk_convert(nk_ctx, &nk_commands, &nk_vertices, &nk_indices, &nk.nk_convert_config
+        std.debug.assert(nk.nk_convert(nk_ctx, &self.nk_commands, &self.nk_vertices, &self.nk_indices, &nk.nk_convert_config
         {
             .shape_AA = nk.NK_ANTI_ALIASING_ON,
             .line_AA = nk.NK_ANTI_ALIASING_ON,
@@ -228,9 +261,12 @@ pub fn end(nk_ctx: *nk.nk_context) !void
                 .uv = undefined,
             },
         }) == nk.NK_CONVERT_SUCCESS);
+        defer nk.nk_buffer_clear(&self.nk_commands);
+        defer nk.nk_buffer_clear(&self.nk_vertices);
+        defer nk.nk_buffer_clear(&self.nk_indices);
 
-        try self.vertices_buffer.update(u8, 0, @ptrCast([*]u8, nk_vertices.memory.ptr.?)[0..nk_vertices.size]);
-        try self.indices_buffer.update(u8, 0, @ptrCast([*]u8, nk_indices.memory.ptr.?)[0..nk_indices.size]);
+        try self.vertices_buffer.update(u8, 0, @ptrCast([*]u8, self.nk_vertices.memory.ptr.?)[0..self.nk_vertices.size]);
+        try self.indices_buffer.update(u8, 0, @ptrCast([*]u8, self.nk_indices.memory.ptr.?)[0..self.nk_indices.size]);
         // try self.rectangles_buffer.update(Rectangle, 0, self.rectangles.items);
 
         //#Color Pass 1: main 
@@ -275,14 +311,14 @@ pub fn end(nk_ctx: *nk.nk_context) !void
             self.command_buffer.setIndexBuffer(self.indices_buffer, .u16);
 
             {
-                var cmd: ?*const nk.nk_draw_command = nk.nk__draw_begin(nk_ctx, &nk_commands);
+                var cmd: ?*const nk.nk_draw_command = nk.nk__draw_begin(nk_ctx, &self.nk_commands);
 
                 var index_offset: u32 = 0;
 
                 while (cmd) |command|
                 {
-                    defer cmd = nk.nk__draw_next(cmd, &nk_commands, nk_ctx);
-                    
+                    defer cmd = nk.nk__draw_next(cmd, &self.nk_commands, nk_ctx);
+
                     if (command.elem_count == 0) continue;
 
                     self.command_buffer.setPushData(MeshPipelinePushData, .{
@@ -296,6 +332,7 @@ pub fn end(nk_ctx: *nk.nk_context) !void
                         @floatToInt(u32, @min(command.clip_rect.w, @intToFloat(f32, window.getWidth()))), 
                         @floatToInt(u32, @min(command.clip_rect.h, @intToFloat(f32, window.getHeight())))
                     );
+
                     self.command_buffer.drawIndexed(command.elem_count, 1, index_offset, 0, 0);
                     index_offset += command.elem_count;
                 }
@@ -361,4 +398,99 @@ pub const Rectangle = extern struct
 pub fn drawRectangle(rectangle: Rectangle) void 
 {
     self.rectangles.append(self.allocator, rectangle) catch unreachable;
+}
+
+pub fn renderImGuiDrawData(draw_data: *const imgui.ImDrawData) !void 
+{
+    {
+        try self.command_buffer.begin();
+        defer self.command_buffer.end();
+
+        //#Color Pass 1: main 
+        {
+            self.command_buffer.beginRenderPass(
+                0, 
+                0, 
+                window.getWidth(), 
+                window.getHeight(), 
+                &[_]graphics.CommandBuffer.Attachment 
+                {
+                    .{
+                        .image = self.color_target_image,
+                    }
+                }, 
+                null
+            );
+            defer self.command_buffer.endRenderPass();
+
+            self.command_buffer.setGraphicsPipeline(self.mesh_pipeline);
+            self.command_buffer.setViewport(
+                0, 0, 
+                @intToFloat(f32, window.getWidth()), 
+                @intToFloat(f32, window.getHeight()), 
+                0, 
+                1
+            );
+            self.command_buffer.setScissor(0, 0, window.getWidth(), window.getHeight());
+
+            // const projection = zalgebra.orthographic(0, @intToFloat(f32, window.getWidth()), 0, @intToFloat(f32, window.getHeight()), 0, 1);
+
+            var ortho = [4][4]f32 
+            {
+                .{2.0, 0.0, 0.0, 0.0},
+                .{0.0,-2.0, 0.0, 0.0},
+                .{0.0, 0.0,-1.0, 0.0},
+                .{-1.0,1.0, 0.0, 1.0},
+            };
+            ortho[0][0] /= @intToFloat(f32, window.getWidth());
+            ortho[1][1] /= @intToFloat(f32, window.getHeight());
+
+            self.command_buffer.setIndexBuffer(self.indices_buffer, .u16);
+
+            {
+                var command_list_index: usize = 0;
+
+                var vertex_offset: usize = 0;
+                var index_offset: usize = 0;
+
+                while (command_list_index < @intCast(usize, draw_data.CmdListsCount)) : (command_list_index += 1)
+                {
+                    const command_list: *imgui.ImDrawList = draw_data.CmdLists[command_list_index];
+                    
+                    const vertices: []imgui.ImDrawVert = command_list.VtxBuffer.Data[0..@intCast(usize, command_list.VtxBuffer.Size)];
+                    const indices: []u16 = command_list.IdxBuffer.Data[0..@intCast(usize, command_list.IdxBuffer.Size)];
+
+                    try self.vertices_buffer.update(imgui.ImDrawVert, vertex_offset * @sizeOf(imgui.ImDrawVert), vertices);
+                    try self.indices_buffer.update(u16, index_offset * @sizeOf(u16), indices);
+
+                    var command_index: usize = 0;
+                    
+                    while (command_index < @intCast(usize, command_list.CmdBuffer.Size)) : (command_index += 1)
+                    {
+                        const command: imgui.ImDrawCmd = command_list.CmdBuffer.Data[command_index];
+
+                        self.command_buffer.setPushData(MeshPipelinePushData, .{
+                            .projection = ortho,
+                            .texture_index = @intCast(u32, @ptrToInt(command.TextureId)),
+                        });
+
+                        self.command_buffer.setScissor(
+                            @floatToInt(u32, @max(command.ClipRect.x, 0)), 
+                            @floatToInt(u32, @max(command.ClipRect.y, 0)), 
+                            @floatToInt(u32, @min(command.ClipRect.z, @intToFloat(f32, window.getWidth()))) - @floatToInt(u32, @max(command.ClipRect.x, 0)), 
+                            @floatToInt(u32, @min(command.ClipRect.w, @intToFloat(f32, window.getHeight()))) - @floatToInt(u32, @max(command.ClipRect.y, 0))
+                        );
+
+                        self.command_buffer.drawIndexed(command.ElemCount, 1, @intCast(u32, index_offset) + command.IdxOffset, @intCast(i32, vertex_offset) + @intCast(i32, command.VtxOffset), 0);
+                    }
+
+                    vertex_offset += vertices.len;
+                    index_offset += indices.len;
+                } 
+            }
+        }
+    }
+
+    //quite slow but will do for now
+    try self.command_buffer.submitAndWait();
 }

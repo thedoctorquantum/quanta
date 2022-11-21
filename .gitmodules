@@ -16,3 +16,6 @@
 [submodule "quanta/lib/Nuklear"]
 	path = quanta/lib/Nuklear
 	url = https://github.com/Immediate-Mode-UI/Nuklear.git
+[submodule "quanta/lib/cimgui"]
+	path = quanta/lib/cimgui
+	url = https://github.com/cimgui/cimgui.git

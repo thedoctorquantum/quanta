@@ -25,6 +25,7 @@ pub const Options = struct
     fragment_shader_binary: []align(4) const u8,
     depth_state: DepthState = .{},
     rasterisation_state: RasterisationState = .{},
+    blend_state: BlendState = .{},
 
     pub const DepthState = struct 
     {
@@ -65,6 +66,49 @@ pub const Options = struct
         {
             clockwise,
             counter_clockwise,
+        };
+    };
+
+    pub const BlendState = struct 
+    {
+        blend_enabled: bool = false,
+        src_alpha: BlendFactor = .one,
+        dst_alpha: BlendFactor = .zero,
+        alpha_blend_op: BlendOp = .add,
+        src_color: BlendFactor = .src_alpha,
+        dst_color: BlendFactor = .one_minus_src_alpha,
+        color_blend_op: BlendOp = .add,
+
+        pub const BlendFactor = enum
+        {
+            zero,
+            one,
+            src_color,
+            one_minus_src_color,
+            dst_color,
+            one_minus_dst_color,
+            src_alpha,
+            one_minus_src_alpha,
+            dst_alpha,
+            one_minus_dst_alpha,
+            constant_color,
+            one_minus_constant_color,
+            constant_alpha,
+            one_minus_constant_alpha,
+            src_alpha_saturate,
+            src1_color,
+            one_minus_src1_color,
+            src1_alpha,
+            one_minus_src1_alpha,
+        };
+
+        pub const BlendOp = enum 
+        {
+            add,
+            subtract,
+            reverse_subtract,
+            min,
+            max,
         };
     };
 };
@@ -448,15 +492,15 @@ pub fn init(
                     .logic_op = .copy,
                     .attachment_count = 1,
                     .p_attachments = &[_]vk.PipelineColorBlendAttachmentState {.{
-                        .color_write_mask =.{
+                        .color_write_mask = .{
                             .r_bit = true,
                             .g_bit = true,
                             .b_bit = true,
                             .a_bit = true,   
                         },
-                        .blend_enable = vk.FALSE,
-                        .src_color_blend_factor = .one,
-                        .dst_color_blend_factor = .zero,
+                        .blend_enable = @boolToInt(options.blend_state.blend_enabled),
+                        .src_color_blend_factor = .src_alpha,
+                        .dst_color_blend_factor = .one_minus_src_alpha,
                         .color_blend_op = .add,
                         .src_alpha_blend_factor = .one,
                         .dst_alpha_blend_factor = .zero,

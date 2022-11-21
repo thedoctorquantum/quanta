@@ -1,6 +1,5 @@
 #version 450 
 #extension GL_EXT_scalar_block_layout : enable
-#extension GL_ARB_shader_draw_parameters : enable
 
 struct Vertex 
 {
@@ -36,6 +35,6 @@ void main()
     out_data.color.g = pow(out_data.color.g, 2.2);
     out_data.color.b = pow(out_data.color.b, 2.2);
 
-    gl_Position = push_constants.projection * vec4(vertex.position.xy, 0, 1);
+    gl_Position = push_constants.projection * vec4(vertex.position, 0, 1);
     gl_Position.y = -gl_Position.y;
 }
