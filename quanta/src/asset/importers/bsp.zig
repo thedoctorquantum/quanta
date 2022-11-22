@@ -240,7 +240,7 @@ pub fn import(allocator: std.mem.Allocator, data: []const u8) !ImportResult
             const edge_index = std.math.absCast(surf_edge);
             const edge: Edge = edges[edge_index];
 
-            const index_index = (current_surfedge * 2) + (i * 2);
+            const index_index = (current_surfedge + i) * 2;
 
             if (surf_edge >= 0) 
             {

@@ -406,7 +406,7 @@ pub fn importFree(gltf_import: Import, allocator: std.mem.Allocator) void
 }
 
 ///Header for the binary format
-const ImportBinHeader = packed struct 
+pub const ImportBinHeader = packed struct 
 {
     vertex_count: u32,
     index_count: u32,
@@ -415,7 +415,7 @@ const ImportBinHeader = packed struct
     texture_count: u32,
 };
 
-const ImportBinTexture = packed struct 
+pub const ImportBinTexture = packed struct 
 {
     data_size: u32,
     width: u32,

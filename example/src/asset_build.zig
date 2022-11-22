@@ -1,5 +1,6 @@
 const std = @import("std");
 const quanta = @import("quanta");
+const asset = quanta.asset;
 const gltf = quanta.asset.importers.gltf;
 
 pub fn main() !void 
@@ -13,6 +14,9 @@ pub fn main() !void
     var gpa = std.heap.GeneralPurposeAllocator(.{}) {};
 
     const allocator = gpa.allocator();
+
+    var assets = std.ArrayListUnmanaged(asset.Archive.AssetDescription) {};
+    defer assets.deinit(allocator);
 
     if (false)
     {   
@@ -40,4 +44,17 @@ pub fn main() !void
     defer gm_construct_file.close();
 
     try gm_construct_file.writeAll(gm_construct_gltf_encoded);
+
+    try assets.append(allocator, .{
+        .source_data = gm_construct_gltf_encoded,
+        .source_data_alignment = @alignOf(gltf.ImportBinHeader),
+        .mapped_data_size = gm_construct_gltf_encoded.len,
+    });
+
+    const asset_archive = try asset.Archive.encode(allocator, assets.items);
+
+    const asset_archive_file = std.fs.cwd().openFile(cache_directory ++ "example_assets_archive", .{ .mode = .write_only }) catch try std.fs.cwd().createFile(cache_directory ++ "example_assets_archive", .{});
+    defer asset_archive_file.close();
+
+    try asset_archive_file.writeAll(asset_archive);
 }
