@@ -31,7 +31,7 @@ void main()
 
     vec4 albedo = unpackUnorm4x8(material.albedo_color) * texture(samplers[nonuniformEXT(material.albedo_index)], in_data.uv);
 
-    // output_color = vec4(vec3((in_data.primitive_index) % 2 == 0, (in_data.primitive_index) % 3 == 0, (in_data.primitive_index) % 5 == 0), 1);
+    output_color = vec4(vec3((in_data.primitive_index) % 2 == 0, (in_data.primitive_index) % 3 == 0, (in_data.primitive_index) % 5 == 0), 1);
 
-    output_color = in_data.color * albedo;
+    // output_color = in_data.color * albedo;
 }

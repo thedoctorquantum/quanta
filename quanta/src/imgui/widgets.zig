@@ -22,3 +22,8 @@ pub fn textFormat(comptime format: []const u8, args: anytype) void
 
     text(std.fmt.bufPrint(&format_buf, format, args) catch unreachable);
 }
+
+pub fn button(label: [:0]const u8) bool
+{
+    return imgui.igButton(label.ptr, .{ .x = 0, .y = 0 });
+}

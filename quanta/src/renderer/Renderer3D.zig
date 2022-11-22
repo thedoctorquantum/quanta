@@ -1065,17 +1065,17 @@ fn packUnorm4x8(v: [4]f32) u32
 }
 
 pub fn createMaterial(
-    albedo_texture_data: []const u8,
-    albedo_texture_width: u32,
-    albedo_texture_height: u32,
+    albedo_texture_data: ?[]const u8,
+    albedo_texture_width: ?u32,
+    albedo_texture_height: ?u32,
     albedo_color: [4]f32,
 ) !MaterialHandle 
 {
     const material_handle = @intCast(u32, self.materials.items.len);
 
     var albedo_image = try Image.init(
-        albedo_texture_width, 
-        albedo_texture_height, 
+        albedo_texture_width orelse 1, 
+        albedo_texture_height orelse 1, 
         1, 
         1,
         .r8g8b8a8_srgb, 
@@ -1089,7 +1089,12 @@ pub fn createMaterial(
 
     try self.albedo_images.append(self.allocator, albedo_image);
 
-    var albedo_staging_buffer = try graphics.Buffer.initData(u8, albedo_texture_data, .staging); 
+    var albedo_staging_buffer = try graphics.Buffer.initData(
+        u8, 
+        albedo_texture_data orelse 
+        @ptrCast([*]const u8, &[_]u32 { std.math.maxInt(u32) })[0..@sizeOf(u32)], 
+        .staging
+    ); 
     errdefer albedo_staging_buffer.deinit();
 
     var albedo_transfer_event = try graphics.Event.init();

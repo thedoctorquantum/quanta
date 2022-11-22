@@ -7,6 +7,10 @@ var time: i64 = 0;
 
 pub fn init() !void 
 {
+    const io: *imgui.ImGuiIO = @ptrCast(*imgui.ImGuiIO, imgui.igGetIO());
+
+    io.ConfigFlags |= imgui.ImGuiConfigFlags_DockingEnable;
+
     window.window.setMouseButtonCallback(mouseButtonCallback);
     window.window.setKeyCallback(keyCallback);
     window.window.setScrollCallback(scrollCallback);

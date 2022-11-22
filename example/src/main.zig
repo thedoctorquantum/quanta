@@ -139,7 +139,7 @@ pub fn main() !void
     try RendererGui.init(allocator, swapchain);
     defer RendererGui.deinit();
 
-    const test_scene_file_path = "zig-out/bin/assets/Suzanne";
+    const test_scene_file_path = "zig-out/bin/assets/gm_construct";
 
     const test_scene_fd = try std.os.open(test_scene_file_path, std.os.O.RDONLY, std.os.S.IRUSR | std.os.S.IWUSR);
     defer std.os.close(test_scene_fd);
@@ -184,9 +184,16 @@ pub fn main() !void
         );
     }
 
-    for (test_scene_import.materials) |material, i|
+    if (test_scene_materials_by_texture.len != 0)
     {
-        test_scene_materials[i] = test_scene_materials_by_texture[material.albedo_texture_index];
+        for (test_scene_import.materials) |material, i|
+        {
+            test_scene_materials[i] = test_scene_materials_by_texture[material.albedo_texture_index];
+        }
+    }
+    else 
+    {
+        test_scene_materials[0] = try Renderer3D.createMaterial(null, null, null, .{ 1, 1, 1, 1 });
     }
 
     const triangle_mesh = try Renderer3D.createMesh(
@@ -253,20 +260,6 @@ pub fn main() !void
 
     _ = second_mesh;
 
-    // const material2 = try Renderer3D.createMaterial(
-    //     wood_floor_import.data, 
-    //     wood_floor_import.width, 
-    //     wood_floor_import.height, 
-    //     .{ 1, 0.4, 0.4, 1 }
-    // );
-
-    // const material = try Renderer3D.createMaterial(
-    //     tileset_import.data, 
-    //     tileset_import.width, 
-    //     tileset_import.height, 
-    //     .{ 1, 1, 1, 1 }
-    // );
-
     const target_frame_time: f32 = 16; 
 
     var delta_time: f32 = target_frame_time;
@@ -328,7 +321,7 @@ pub fn main() !void
             if (camera_enable)
             {
                 const sensitivity = 0.1;
-                const camera_speed = @splat(3, @as(f32, 5)) * @splat(3, delta_time / 1000);
+                const camera_speed = @splat(3, @as(f32, 200)) * @splat(3, delta_time / 1000);
 
                 yaw += x_offset * sensitivity;
                 pitch += y_offset * sensitivity;
@@ -394,15 +387,23 @@ pub fn main() !void
             try quanta.imgui.driver.begin();
             defer quanta.imgui.driver.end();
 
+            const widgets = quanta.imgui.widgets;
+
             imgui.igNewFrame();
 
             imgui.igShowDemoWindow(null);
 
-            if (quanta.imgui.widgets.begin("lol"))
+            if (widgets.begin("lol"))
             {
-                quanta.imgui.widgets.textFormat("Frame time {d:.2}", .{ delta_time });
+                widgets.textFormat("Frame time {d:.2}", .{ delta_time });
+                widgets.textFormat("hello {s}!", .{ "world" });
+
+                if (widgets.button("Lol"))
+                {
+                    std.log.info("sus", .{});
+                }
             }
-            quanta.imgui.widgets.end();
+            widgets.end();
 
             imgui.igRender();
         }
