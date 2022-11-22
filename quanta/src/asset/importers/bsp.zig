@@ -79,6 +79,8 @@ pub const SurfFlags = packed struct(u32)
     no_decals: bool,
     no_chop: bool,
     hit_box: bool,
+    
+    pad: u16,
 };
 
 pub const TexInfo = extern struct 
@@ -209,10 +211,28 @@ pub fn import(allocator: std.mem.Allocator, data: []const u8) !ImportResult
     const faces_length = header.lumps[@enumToInt(LumpType.faces)].filelen / @sizeOf(Face); 
     const faces = @ptrCast([*]const Face, @alignCast(@alignOf(Face), data.ptr + faces_offset))[0..faces_length];
 
+    const tex_infos_offset = @intCast(usize, header.lumps[@enumToInt(LumpType.tex_info)].fileofs);
+    const tex_infos_length = header.lumps[@enumToInt(LumpType.tex_info)].filelen / @sizeOf(TexInfo); 
+    const tex_infos = @ptrCast([*]const TexInfo, @alignCast(@alignOf(TexInfo), data.ptr + tex_infos_offset))[0..tex_infos_length];
+
     var current_surfedge: usize = 0; 
 
     for (faces) |face|
     {
+        const tex_info: TexInfo = tex_infos[@intCast(usize, face.texinfo)];
+
+        if (
+            tex_info.flags.trigger or 
+            tex_info.flags.skip or 
+            tex_info.flags.hit_box or 
+            tex_info.flags.no_draw or
+            tex_info.flags.sky2d or 
+            tex_info.flags.sky
+        )
+        {
+            continue;
+        }
+
         const face_surfedges: []const i32 = surfedges[@intCast(usize, face.firstedge)..@intCast(usize, face.firstedge) + @intCast(usize, face.numedges)];
 
         for (face_surfedges) |surf_edge, i|
