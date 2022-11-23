@@ -98,9 +98,9 @@ pub fn decode(allocator: std.mem.Allocator, image: []u8) !Archive
 
     var image_offset: usize = 0;
 
-    image_offset += @sizeOf(Header);
-
     const header = @ptrCast(*const Header, @alignCast(@alignOf(Header), image.ptr + image_offset)).*;
+
+    image_offset += @sizeOf(Header);
 
     image_offset = std.mem.alignForward(image_offset, @alignOf(AssetHeader));
 

@@ -18,19 +18,18 @@ pub fn main() !void
     var assets = std.ArrayListUnmanaged(asset.Archive.AssetDescription) {};
     defer assets.deinit(allocator);
 
-    if (false)
+    if (true)
     {   
-        const sponza = try gltf.import(allocator, "example/src/assets/test_scene.gltf");
+        const sponza = try gltf.import(allocator, "example/src/assets/sponza/Sponza.gltf");
         defer gltf.importFree(sponza, allocator);
     
-        const sponza_file = std.fs.cwd().openFile(cache_directory ++ "test_scene", .{ .mode = .write_only }) catch try std.fs.cwd().createFile(cache_directory ++ "test_scene", .{});
-        defer sponza_file.close();
-    
-        try sponza_file.seekTo(0);
-    
-        const sponza_encoded = try gltf.encode(allocator, sponza);
-    
-        try sponza_file.writeAll(sponza_encoded);
+        const sponza_encoded = try gltf.encode(allocator, sponza);    
+
+        try assets.append(allocator, .{
+            .source_data = sponza_encoded,
+            .source_data_alignment = @alignOf(gltf.ImportBinHeader),
+            .mapped_data_size = sponza_encoded.len,
+        });
     }
 
     const gm_construct_bsp = try quanta.asset.importers.bsp.importFile(allocator, "example/src/assets/gm_construct.bsp");
@@ -40,15 +39,23 @@ pub fn main() !void
 
     const gm_construct_gltf_encoded = try gltf.encode(allocator, gm_construct_gltf);
 
-    const gm_construct_file = std.fs.cwd().openFile(cache_directory ++ "gm_construct", .{ .mode = .write_only }) catch try std.fs.cwd().createFile(cache_directory ++ "gm_construct", .{});
-    defer gm_construct_file.close();
-
-    try gm_construct_file.writeAll(gm_construct_gltf_encoded);
-
     try assets.append(allocator, .{
         .source_data = gm_construct_gltf_encoded,
         .source_data_alignment = @alignOf(gltf.ImportBinHeader),
         .mapped_data_size = gm_construct_gltf_encoded.len,
+    });
+
+    const gm_castle_island_bsp = try quanta.asset.importers.bsp.importFile(allocator, "example/src/assets/gm_castle_island.bsp");
+    defer quanta.asset.importers.bsp.importFree(allocator, gm_castle_island_bsp);
+
+    const gm_castle_island_gltf = try quanta.asset.importers.bsp.convertToGltfImport(allocator, gm_castle_island_bsp);
+
+    const gm_castle_island_gltf_encoded = try gltf.encode(allocator, gm_castle_island_gltf);
+
+    try assets.append(allocator, .{
+        .source_data = gm_castle_island_gltf_encoded,
+        .source_data_alignment = @alignOf(gltf.ImportBinHeader),
+        .mapped_data_size = gm_castle_island_gltf_encoded.len,
     });
 
     const asset_archive = try asset.Archive.encode(allocator, assets.items);

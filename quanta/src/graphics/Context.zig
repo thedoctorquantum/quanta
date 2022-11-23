@@ -116,7 +116,6 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdCopyBufferToImage2 = true,
     .createSampler = true,
     .destroySampler = true,
-    .cmdPushDescriptorSetKHR = true,
     .cmdDrawIndexedIndirect = true,
     .cmdDrawIndexedIndirectCount = true,
     .cmdSetEvent = true,
@@ -125,6 +124,14 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .createEvent = true,
     .destroyEvent = true,
     .getFenceStatus = true,
+    .createQueryPool = true,
+    .destroyQueryPool = true,
+    .cmdWriteTimestamp2 = true,
+    .resetQueryPool = true,
+    .cmdResetQueryPool = true,
+    .cmdBeginQuery = true,
+    .cmdEndQuery = true,
+    .getQueryPoolResults = true,
 });
 
 var vkGetInstanceProcAddr: vk.PfnGetInstanceProcAddr = undefined;
@@ -430,7 +437,6 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
     const device_extentions = [_][*:0]const u8 
     { 
         vk.extension_info.khr_swapchain.name,
-        vk.extension_info.khr_push_descriptor.name,
     };
 
     var device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 

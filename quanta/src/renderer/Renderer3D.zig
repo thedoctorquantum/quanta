@@ -115,6 +115,7 @@ mesh_data_changed: bool,
 material_data_changed: bool,
 
 statistics: Statistics,
+timeline_query_pool: vk.QueryPool,
 
 fn previousPow2(v: u32) u32
 {
@@ -378,6 +379,19 @@ pub fn init(
     self.cull_pipeline.setDescriptorBuffer(3, 0, self.draw_indirect_buffer);
     self.cull_pipeline.setDescriptorBuffer(4, 0, self.draw_indirect_count_buffer);
     self.cull_pipeline.setDescriptorBuffer(5, 0, self.input_draw_buffer);
+
+    self.timeline_query_pool = try GraphicsContext.self.vkd.createQueryPool(
+        GraphicsContext.self.device, 
+        &vk.QueryPoolCreateInfo
+        {
+            .flags = vk.QueryPoolCreateFlags {},
+            .query_type = vk.QueryType.timestamp,
+            .query_count = 4,
+            .pipeline_statistics = vk.QueryPipelineStatisticFlags {},
+        },
+        &GraphicsContext.self.allocation_callbacks
+    );
+    errdefer GraphicsContext.self.vkd.destroyQueryPool(GraphicsContext.self.device, self.timeline_query_pool, &GraphicsContext.self.allocation_callbacks);
 }
 
 pub fn deinit() void 
@@ -426,6 +440,7 @@ pub fn deinit() void
     {
         sampler.deinit();
     };
+    defer GraphicsContext.self.vkd.destroyQueryPool(GraphicsContext.self.device, self.timeline_query_pool, &GraphicsContext.self.allocation_callbacks);
 }
 
 pub const Camera = struct 
@@ -691,6 +706,8 @@ fn endRenderInternal() !void
         command_buffer.begin() catch unreachable;
         defer command_buffer.end();
 
+        GraphicsContext.self.vkd.cmdResetQueryPool(command_buffer.handle, self.timeline_query_pool, 0, 4);
+
         //compute pass #1 pre depth per instance cull
         {
 
@@ -777,6 +794,11 @@ fn endRenderInternal() !void
                 .view_projection = view_projection.data,
             });
 
+            GraphicsContext.self.vkd.cmdWriteTimestamp2(command_buffer.handle, vk.PipelineStageFlags2
+            {
+                .top_of_pipe_bit = true,
+            }, self.timeline_query_pool, 0);
+
             command_buffer.drawIndexedIndirectCount(
                 self.draw_indirect_buffer, 
                 0, 
@@ -785,6 +807,11 @@ fn endRenderInternal() !void
                 0,
                 self.draw_index
             );
+
+            GraphicsContext.self.vkd.cmdWriteTimestamp2(command_buffer.handle, vk.PipelineStageFlags2
+            {
+                .bottom_of_pipe_bit = true,
+            }, self.timeline_query_pool, 1);
         }
 
         //Depth reduce
@@ -892,6 +919,11 @@ fn endRenderInternal() !void
                 .view_projection = view_projection.data,
             });
 
+            GraphicsContext.self.vkd.cmdWriteTimestamp2(command_buffer.handle, vk.PipelineStageFlags2
+            {
+                .top_of_pipe_bit = true,
+            }, self.timeline_query_pool, 2);
+
             command_buffer.drawIndexedIndirectCount(
                 self.draw_indirect_buffer, 
                 0, 
@@ -900,6 +932,11 @@ fn endRenderInternal() !void
                 0,
                 self.draw_index
             );
+
+            GraphicsContext.self.vkd.cmdWriteTimestamp2(command_buffer.handle, vk.PipelineStageFlags2
+            {
+                .bottom_of_pipe_bit = true,
+            }, self.timeline_query_pool, 3);
         }
 
         command_buffer.imageBarrier(color_image, .{
@@ -952,6 +989,22 @@ fn endRenderInternal() !void
 
     self.frame_fence.wait();
     self.frame_fence.reset();
+
+    var times = [_]u64 { 0, 0, 0, 0 };
+
+    _ = try GraphicsContext.self.vkd.getQueryPoolResults(
+        GraphicsContext.self.device, 
+        self.timeline_query_pool, 
+        0, 
+        4, 
+        @sizeOf(@TypeOf(times)), 
+        &times, 
+        @sizeOf(u64), 
+        vk.QueryResultFlags { .wait_bit = true, .@"64_bit" = true }
+    );
+
+    self.statistics.depth_prepass_time = times[1] - times[0];
+    self.statistics.geometry_pass_time = times[3] - times[2];
 }
 
 const Mesh = extern struct 
@@ -1168,6 +1221,8 @@ pub const Statistics = struct
 {
     vertex_shader_invocations: u32,
     fragment_shader_invocations: u32,
+    depth_prepass_time: u64,
+    geometry_pass_time: u64,
 };
 
 pub fn getStatistics() Statistics

@@ -34,6 +34,8 @@ pub const LumpType = enum(u8)
     areas = 20,
     area_portals = 21,
     portals = 22,
+    disp_verts = 33,
+    dispinfo = 26,
     // unused0 = 23,
     // prop_collision = 24,
     pak_file = 40,
@@ -135,6 +137,47 @@ pub const Face = extern struct
     }
 };
 
+const DispInfo = extern struct
+{
+	startPosition: [3]f32,                // start position used for orientation
+	DispVertStart: i32,                // Index into LUMP_DISP_VERTS.
+	DispTriStart: i32,                 // Index into LUMP_DISP_TRIS.
+	power: i32,                        // power - indicates size of surface (2^power 1)
+	minTess: i32,                      // minimum tesselation allowed
+	smoothingAngle: f32,               // lighting smoothing angle
+	contents: i32,                     // surface contents
+	MapFace: u16,                      // Which map face this displacement comes from.
+	LightmapAlphaStart: u32,           // Index into ddisplightmapalpha.
+	LightmapSamplePositionStart: u32,  // Index into LUMP_DISP_LIGHTMAP_SAMPLE_POSITIONS.
+    EdgeNeighbors: [4]DispNeighbour,             // Indexed by NEIGHBOREDGE_ defines.
+	CornerNeighbors: [4]DispCornerNeighbours,           // Indexed by CORNER_ defines.
+	AllowedVerts: [10]u32,             // active verticies
+};
+
+comptime
+{
+    std.debug.assert(@sizeOf(DispInfo) == 176);
+}
+
+const DispSubNeighbour = extern struct
+{
+    index: u16 = 0xFFFF,
+    orientation: u8,
+    span: u8,
+    neighbourSpan: u8,
+};
+
+const DispNeighbour = extern struct
+{
+    subNeighbors: [2]DispSubNeighbour,
+};
+
+const DispCornerNeighbours = extern struct
+{
+    neighbours: [4]u16,
+    numNeighbours: u8,
+};
+
 pub fn importFile(allocator: std.mem.Allocator, file_path: []const u8) !ImportResult 
 {
     const file = try std.fs.cwd().openFile(file_path, .{});
@@ -202,6 +245,10 @@ pub fn import(allocator: std.mem.Allocator, data: []const u8) !ImportResult
     const surfedges_length = header.lumps[@enumToInt(LumpType.surfedges)].filelen / @sizeOf(i32); 
     const surfedges = @ptrCast([*]const i32, @alignCast(@alignOf(i32), data.ptr + surfedges_offset))[0..surfedges_length];
 
+    const dispinfos_offset = @intCast(usize, header.lumps[@enumToInt(LumpType.dispinfo)].fileofs);
+    const dispinfos_length = header.lumps[@enumToInt(LumpType.dispinfo)].filelen / @sizeOf(DispInfo); 
+    const dispinfos = @ptrCast([*]const DispInfo, @alignCast(@alignOf(DispInfo), data.ptr + dispinfos_offset))[0..dispinfos_length];
+
     log.info("surfedges.len = {}", .{ surfedges.len });
 
     result.indices = try allocator.alloc(u16, surfedges.len * 2);
@@ -217,6 +264,8 @@ pub fn import(allocator: std.mem.Allocator, data: []const u8) !ImportResult
 
     var current_surfedge: usize = 0; 
 
+    var triangle_count: usize = 0;
+
     for (faces) |face|
     {
         const tex_info: TexInfo = tex_infos[@intCast(usize, face.texinfo)];
@@ -231,6 +280,17 @@ pub fn import(allocator: std.mem.Allocator, data: []const u8) !ImportResult
         )
         {
             continue;
+        }
+
+        if (face.dispinfo < 0)
+        {
+            triangle_count += @intCast(u32, face.numedges) - 2;
+        }
+        else 
+        { 
+            const size = @as(u32, 1) << @intCast(u5, dispinfos[@intCast(usize, face.dispinfo)].power);
+
+            triangle_count += size * size * 2;
         }
 
         const face_surfedges: []const i32 = surfedges[@intCast(usize, face.firstedge)..@intCast(usize, face.firstedge) + @intCast(usize, face.numedges)];
