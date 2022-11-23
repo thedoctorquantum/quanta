@@ -274,6 +274,9 @@ pub fn main() !void
         .{ 0, 0, 0 },
     );
 
+    const scene = try Renderer3D.createScene(1, 50_000);
+    defer Renderer3D.destroyScene(scene);
+
     _ = second_mesh;
 
     const target_frame_time: f32 = 16; 
@@ -387,14 +390,24 @@ pub fn main() !void
         color_image.handle = image.image;
         color_image.aspect_mask = .{ .color_bit = true };
 
-        //draw scene
+        // //draw scene
+        // {
+        //     try Renderer3D.beginRender(camera);
+        //     defer Renderer3D.endRender();
+
+        //     for (test_scene_import.sub_meshes) |sub_mesh, i|
+        //     {
+        //         Renderer3D.drawMesh(test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
+        //     }
+        // }
+
         {
-            try Renderer3D.beginRender(camera);
-            defer Renderer3D.endRender();
+            try Renderer3D.beginSceneRender(scene, &.{ Renderer3D.View { .camera = camera } });
+            defer Renderer3D.endSceneRender(scene);
 
             for (test_scene_import.sub_meshes) |sub_mesh, i|
             {
-                Renderer3D.drawMesh(test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
+                Renderer3D.sceneDrawMesh(scene, test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
             }
         }
 
