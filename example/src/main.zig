@@ -83,6 +83,7 @@ const example_assets = struct
     const sponza = @intToEnum(asset.Archive.AssetDescriptor, 0);
     const gm_construct = @intToEnum(asset.Archive.AssetDescriptor, 1);
     const gm_castle_island = @intToEnum(asset.Archive.AssetDescriptor, 2);
+    const environment_map = @intToEnum(asset.Archive.AssetDescriptor, 3);
 };
 
 pub fn main() !void 
@@ -274,8 +275,25 @@ pub fn main() !void
         .{ 0, 0, 0 },
     );
 
-    const scene = try Renderer3D.createScene(1, 50_000);
+    const environment_map_data = asset_archive.getAssetData(example_assets.environment_map);
+
+    const scene = try Renderer3D.createScene(
+        1, 
+        50_000, 
+        environment_map_data, 
+        1024, 1024
+    );
     defer Renderer3D.destroyScene(scene);
+
+    for (test_scene_import.sub_meshes) |sub_mesh, i|
+    {
+        try Renderer3D.sceneAddStaticMesh(
+            scene, 
+            test_scene_meshes[i], 
+            test_scene_materials[sub_mesh.material_index], 
+            quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform }
+        );
+    }
 
     _ = second_mesh;
 
@@ -340,7 +358,7 @@ pub fn main() !void
             if (camera_enable)
             {
                 const sensitivity = 0.1;
-                const camera_speed = @splat(3, @as(f32, 5)) * @splat(3, delta_time / 1000);
+                const camera_speed = @splat(3, @as(f32, 10)) * @splat(3, delta_time / 1000);
 
                 yaw += x_offset * sensitivity;
                 pitch += y_offset * sensitivity;
@@ -390,28 +408,13 @@ pub fn main() !void
         color_image.handle = image.image;
         color_image.aspect_mask = .{ .color_bit = true };
 
-        // //draw scene
-        // {
-        //     try Renderer3D.beginRender(camera);
-        //     defer Renderer3D.endRender();
-
-        //     for (test_scene_import.sub_meshes) |sub_mesh, i|
-        //     {
-        //         Renderer3D.drawMesh(test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
-        //     }
-        // }
-
         {
             try Renderer3D.beginSceneRender(scene, &.{ Renderer3D.View { .camera = camera } });
             defer Renderer3D.endSceneRender(scene);
-
-            for (test_scene_import.sub_meshes) |sub_mesh, i|
-            {
-                Renderer3D.sceneDrawMesh(scene, test_scene_meshes[i], test_scene_materials[sub_mesh.material_index], quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform });
-            }
         }
 
         //imgui gui
+        if (false)
         {
             try quanta.imgui.driver.begin();
             defer quanta.imgui.driver.end();
@@ -450,6 +453,7 @@ pub fn main() !void
         }
 
         //draw imgui
+        if (false)
         {
             RendererGui.begin(&color_image);
             RendererGui.renderImGuiDrawData(imgui.igGetDrawData()) catch unreachable;

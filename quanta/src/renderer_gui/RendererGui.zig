@@ -53,6 +53,7 @@ pub fn createTexture(data: []const u8, width: u32, height: u32) !TextureHandle
     const handle = @intToEnum(TextureHandle, @intCast(u32, self.textures.items.len + 1));
 
     var image = try graphics.Image.initData(
+        .@"2d",
         data,
         width, 
         height, 

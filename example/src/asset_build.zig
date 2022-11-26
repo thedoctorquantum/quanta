@@ -2,6 +2,7 @@ const std = @import("std");
 const quanta = @import("quanta");
 const asset = quanta.asset;
 const gltf = quanta.asset.importers.gltf;
+const png = quanta.asset.importers.png;
 
 pub fn main() !void 
 {
@@ -56,6 +57,26 @@ pub fn main() !void
         .source_data = gm_castle_island_gltf_encoded,
         .source_data_alignment = @alignOf(gltf.ImportBinHeader),
         .mapped_data_size = gm_castle_island_gltf_encoded.len,
+    });
+
+    var environment_map = try png.importCubeFile(
+        allocator, 
+        [_][]const u8
+        {
+            "example/src/assets/skybox/right.png", //x+
+            "example/src/assets/skybox/left.png", //x-
+            "example/src/assets/skybox/top.png", //y+
+            "example/src/assets/skybox/bottom.png", //y-
+            "example/src/assets/skybox/back.png", //z+
+            "example/src/assets/skybox/front.png", //z-
+        }
+    ); 
+    defer png.free(&environment_map, allocator);
+
+    try assets.append(allocator, .{
+        .source_data = environment_map.data,
+        .source_data_alignment = @alignOf(u32),
+        .mapped_data_size = environment_map.data.len,
     });
 
     const asset_archive = try asset.Archive.encode(allocator, assets.items);

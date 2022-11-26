@@ -153,17 +153,17 @@ fn debugUtilsMessengerCallback(
 
     if (message_severity.error_bit_ext)
     {
-        log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        log.err("{s} {s}", .{ p_callback_data.?.p_message_id_name orelse "", p_callback_data.?.p_message });
         std.os.exit(0);
     }
     else if (message_severity.warning_bit_ext)
     {
-        log.warn("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        log.warn("{s} {s}", .{ p_callback_data.?.p_message_id_name orelse "", p_callback_data.?.p_message });
         std.os.exit(0);
     }
     else
     {
-        log.debug("{s} {s}", .{ p_callback_data.?.p_message_id_name.?, p_callback_data.?.p_message });
+        log.debug("{s} {s}", .{ p_callback_data.?.p_message_id_name orelse "", p_callback_data.?.p_message });
     }
 
     return vk.FALSE;

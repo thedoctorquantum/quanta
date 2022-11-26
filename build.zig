@@ -87,6 +87,8 @@ fn preBuildQuanta(mode: std.builtin.Mode, builder: *std.build.Builder) !PreBuild
 
     const renderer_tri_vert_glsl = try compileShader(builder, mode, "vert", "quanta/src/renderer/tri.vert.glsl", shaders_directory_path ++ "tri.vert.spv");
     const renderer_tri_frag_glsl = try compileShader(builder, mode, "frag", "quanta/src/renderer/tri.frag.glsl", "quanta/src/renderer/spirv/tri.frag.spv");
+    const renderer_sky_vert_glsl = try compileShader(builder, mode, "vert", "quanta/src/renderer/sky.vert.glsl", "quanta/src/renderer/spirv/sky.vert.spv");
+    const renderer_sky_frag_glsl = try compileShader(builder, mode, "frag", "quanta/src/renderer/sky.frag.glsl", "quanta/src/renderer/spirv/sky.frag.spv");
     const renderer_depth_vert_glsl = try compileShader(builder, mode, "vert", "quanta/src/renderer/depth.vert.glsl", "quanta/src/renderer/spirv/depth.vert.spv");
     const renderer_depth_frag_glsl = try compileShader(builder, mode, "frag", "quanta/src/renderer/depth.frag.glsl", "quanta/src/renderer/spirv/depth.frag.spv");
     const renderer_cull_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/cull.comp.glsl", "quanta/src/renderer/spirv/cull.comp.spv");
@@ -101,6 +103,8 @@ fn preBuildQuanta(mode: std.builtin.Mode, builder: *std.build.Builder) !PreBuild
 
     options.step.dependOn(renderer_tri_vert_glsl.step);
     options.step.dependOn(renderer_tri_frag_glsl.step);
+    options.step.dependOn(renderer_sky_vert_glsl.step);
+    options.step.dependOn(renderer_sky_frag_glsl.step);
     options.step.dependOn(renderer_depth_vert_glsl.step);
     options.step.dependOn(renderer_depth_frag_glsl.step);
     options.step.dependOn(renderer_cull_comp_glsl.step);
@@ -180,7 +184,7 @@ pub fn build(builder: *std.build.Builder) !void
         const exe = builder.addExecutable("example_assets", "example/src/asset_build.zig");
 
         exe.setTarget(std.zig.CrossTarget.fromTarget(builder.host.target));
-        exe.setBuildMode(.Debug);
+        exe.setBuildMode(.ReleaseFast);
         exe.install();
 
         try buildQuanta(builder, exe, quanta_prebuild);

@@ -207,6 +207,11 @@ pub fn init(
     comptime PushDataType: ?type,
     ) !GraphicsPipeline
 {
+    if (@sizeOf(PushDataType orelse void) > 128)
+    {
+        @compileLog("PushData cannot be larger than 128 bytes");
+    }
+
     var shader_parse_result: spirv_parse.ShaderParseResult = std.mem.zeroes(spirv_parse.ShaderParseResult);
 
     try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.vertex_shader_binary.ptr)[0..options.vertex_shader_binary.len / 4]);

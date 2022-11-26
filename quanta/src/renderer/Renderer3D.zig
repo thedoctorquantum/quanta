@@ -83,10 +83,7 @@ depth_reduce_pipeline: graphics.ComputePipeline,
 cull_pipeline: graphics.ComputePipeline,
 depth_pipeline: graphics.GraphicsPipeline,
 color_pipeline: graphics.GraphicsPipeline,
-
-// draw_indirect_buffer: graphics.Buffer,
-// draw_indirect_count_buffer: graphics.Buffer,
-// draw_index: u32,
+sky_pipeline: graphics.GraphicsPipeline,
 
 meshes: std.ArrayListUnmanaged(Mesh),
 mesh_buffer: graphics.Buffer,
@@ -94,17 +91,8 @@ mesh_buffer: graphics.Buffer,
 mesh_lods: std.ArrayListUnmanaged(MeshLod),
 mesh_lod_buffer: graphics.Buffer,
 
-// transforms: [][4][3]f32,
-// transforms_buffer: graphics.Buffer,
-
-// material_indices: []u32,
-// material_indices_buffer: graphics.Buffer,
-
 materials: std.ArrayListUnmanaged(Material),
 materials_buffer: graphics.Buffer,
-
-// input_draws: []InputDraw,
-// input_draw_buffer: graphics.Buffer,
 
 scenes: std.ArrayListUnmanaged(Scene),
 
@@ -152,6 +140,7 @@ fn initFrameImages(window_width: u32, window_height: u32) !void
     const render_height = window_height;
 
     self.depth_image = try Image.init(
+        .@"2d",
         render_width, render_height, 1, 1,
         vk.Format.d32_sfloat, 
         vk.ImageLayout.attachment_optimal,
@@ -168,6 +157,7 @@ fn initFrameImages(window_width: u32, window_height: u32) !void
     self.depth_pyramid_level_count = getImageMipLevels(depth_pyramid_width, depth_pyramid_height);
 
     self.depth_pyramid = try Image.init(
+        .@"2d",
         depth_pyramid_width, depth_pyramid_height, 1,
         self.depth_pyramid_level_count,
         vk.Format.r32_sfloat, 
@@ -252,19 +242,6 @@ pub fn init(
     self.frame_fence = try graphics.Fence.init();
     errdefer self.frame_fence.deinit();
 
-    // const command_count = 4096 * 32;
-
-    // self.draw_indirect_buffer = try graphics.Buffer.init(command_count * @sizeOf(DrawCommand), .indirect_draw);
-    // errdefer self.draw_indirect_buffer.deinit();
-
-    // self.draw_indirect_count_buffer = try graphics.Buffer.init(@sizeOf(u32), .indirect_draw);
-    // errdefer self.draw_indirect_count_buffer.deinit();
-
-    // self.input_draw_buffer = try graphics.Buffer.init(command_count * @sizeOf(InputDraw), .storage);
-    // errdefer self.input_draw_buffer.deinit();
-
-    // self.input_draws = try self.input_draw_buffer.map(InputDraw);
-
     self.mesh_buffer = try graphics.Buffer.init(4096, .storage);
     errdefer self.mesh_buffer.deinit();
 
@@ -327,6 +304,31 @@ pub fn init(
         ColorPassPushConstants,
     );
     errdefer self.color_pipeline.deinit(allocator);
+
+    self.sky_pipeline = try graphics.GraphicsPipeline.init(
+        self.allocator,
+        .{
+            .color_attachment_formats = &[_]vk.Format 
+            {
+                swapchain.surface_format.format,
+            },
+            .depth_attachment_format = self.depth_image.format,
+            .vertex_shader_binary = @alignCast(4, @embedFile("spirv/sky.vert.spv")),
+            .fragment_shader_binary = @alignCast(4, @embedFile("spirv/sky.frag.spv")),
+            .depth_state = .{
+                .write_enabled = false,
+                .test_enabled = true,
+                .compare_op = .greater_or_equal,
+            },
+            .rasterisation_state = .{
+                .polygon_mode = .fill,
+                .cull_mode = .back,
+            },
+        },
+        null,
+        ColorPassPushConstants,
+    );
+    errdefer self.sky_pipeline.deinit(allocator);
 
     self.depth_pipeline = try graphics.GraphicsPipeline.init(
         self.allocator,
@@ -403,6 +405,7 @@ pub fn deinit() void
     defer self.cull_pipeline.deinit(self.allocator);
     defer self.depth_pipeline.deinit(self.allocator);
     defer self.color_pipeline.deinit(self.allocator);
+    defer self.sky_pipeline.deinit(self.allocator);
     defer self.meshes.deinit(self.allocator);
     defer self.mesh_lods.deinit(self.allocator);
     defer self.materials.deinit(self.allocator);
@@ -434,7 +437,7 @@ pub fn beginSceneRender(scene: SceneHandle, active_views: []const View) !void
 
     std.debug.assert(active_views.len == 1);
 
-    scene_data.draw_count = 0;
+    scene_data.dynamic_draw_count = 0;
     self.camera = active_views[0].camera;
 
     if (self.material_data_changed or self.mesh_data_changed)
@@ -720,7 +723,7 @@ fn endRenderInternal(scene: SceneHandle) !void
             near_face = createPlane(self.camera.translation + (@splat(3, near_plane) * front), front);
 
             command_buffer.setPushData(DrawCullPushConstants, .{ 
-                .draw_count = @intCast(u32, scene_data.draw_count),
+                .draw_count = scene_data.static_draw_count + scene_data.dynamic_draw_count,
                 .near_face = near_face,
                 .far_face = far_face,
                 .right_face = right_face,
@@ -728,7 +731,7 @@ fn endRenderInternal(scene: SceneHandle) !void
                 .top_face = top_face,
                 .bottom_face = bottom_face,
             });
-            command_buffer.computeDispatch(@intCast(u32, scene_data.draw_count), 1, 1);
+            command_buffer.computeDispatch(scene_data.static_draw_count + scene_data.dynamic_draw_count, 1, 1);
 
             command_buffer.bufferBarrier(scene_data.draw_indirect_buffer, .{
                 .source_stage = .{ .compute_shader = true },
@@ -789,7 +792,7 @@ fn endRenderInternal(scene: SceneHandle) !void
                 @sizeOf(DrawCommand),
                 scene_data.draw_indirect_count_buffer,
                 0,
-                scene_data.draw_count
+                scene_data.static_draw_count + scene_data.dynamic_draw_count
             );
 
             GraphicsContext.self.vkd.cmdWriteTimestamp2(command_buffer.handle, vk.PipelineStageFlags2
@@ -884,7 +887,7 @@ fn endRenderInternal(scene: SceneHandle) !void
                 &[_]graphics.CommandBuffer.Attachment {
                     .{
                         .image = &color_image,
-                        .clear = .{ .color = .{ 0, 0, 0, 1 } }
+                        .clear = if (false) .{ .color = .{ 0, 0, 0, 1 } } else null
                     }
                 }, 
                 .{
@@ -914,8 +917,33 @@ fn endRenderInternal(scene: SceneHandle) !void
                 @sizeOf(DrawCommand),
                 scene_data.draw_indirect_count_buffer,
                 0,
-                scene_data.draw_count
+                scene_data.static_draw_count + scene_data.dynamic_draw_count
             );
+
+            if (scene_data.environment_enabled)
+            {
+                const view = zalgebra.lookAt(
+                    .{ .data = self.camera.translation }, 
+                    .{ .data = self.camera.target }, 
+                    .{ .data = .{ 0, -1, 0 } }, //May be problematic, we could flip the ndc clip space instead using vk_maintenence_4 
+                );
+
+                command_buffer.setGraphicsPipeline(self.sky_pipeline);
+                command_buffer.setPushData(ColorPassPushConstants, 
+                .{ 
+                    .view_projection = projection.mul(
+                        .{
+                            .data = .{
+                                .{ view.data[0][0], view.data[0][1], view.data[0][2], 0 },
+                                .{ view.data[1][0], view.data[1][1], view.data[1][2], 0 },
+                                .{ view.data[2][0], view.data[2][1], view.data[2][2], 0 },
+                                .{ 0, 0, 0, 1 }
+                            }
+                        }
+                    ).data
+                });
+                command_buffer.draw(36, 1, 0, 0);
+            }
 
             GraphicsContext.self.vkd.cmdWriteTimestamp2(command_buffer.handle, vk.PipelineStageFlags2
             {
@@ -1012,7 +1040,18 @@ const Scene = struct
 
     draw_indirect_buffer: graphics.Buffer,
     draw_indirect_count_buffer: graphics.Buffer,
-    draw_count: usize = 0,
+
+    environment_image: graphics.Image,
+    environment_sampler: graphics.Sampler,
+    environment_enabled: bool,
+
+    max_draw_count: u32 = 0,
+
+    static_draw_offset: u32 = 0,
+    dynamic_draw_offset: u32 = 0,
+
+    static_draw_count: u32 = 0,
+    dynamic_draw_count: u32 = 0,
 };
 
 pub const SceneHandle = enum(u32) { null, _ }; 
@@ -1020,6 +1059,9 @@ pub const SceneHandle = enum(u32) { null, _ };
 pub fn createScene(
     max_view_count: u32,
     max_mesh_draw_count: u32,
+    environment_data: ?[]const u8,
+    environment_width: ?u32,
+    environment_height: ?u32,
 ) !SceneHandle 
 { 
     std.debug.assert(max_view_count == 1);
@@ -1051,6 +1093,31 @@ pub fn createScene(
 
     scene.material_indices = try scene.material_indices_buffer.map(u32);
 
+    scene.environment_enabled = environment_data != null and environment_width != null and environment_width != null;
+    scene.environment_image = if (scene.environment_enabled) try graphics.Image.initData(
+        .cube, 
+        environment_data.?,
+        environment_width.?, 
+        environment_height.?, 
+        6, 
+        1, 
+        .r8g8b8a8_srgb,  
+        .shader_read_only_optimal,
+        .{
+            .transfer_dst_bit = true, 
+            .sampled_bit = true, 
+        }
+    ) else undefined;
+    errdefer if (scene.environment_enabled) scene.environment_image.deinit();
+
+    scene.environment_sampler = if (scene.environment_enabled) try graphics.Sampler.init(.linear, .linear, null) else undefined;
+    errdefer if (scene.environment_enabled) scene.environment_sampler.deinit();
+
+    if (scene.environment_enabled)
+    {
+        self.sky_pipeline.setDescriptorImageSampler(0, 0, scene.environment_image, scene.environment_sampler);
+    }
+
     self.color_pipeline.setDescriptorBuffer(2, 0, scene.transforms_buffer);
     self.color_pipeline.setDescriptorBuffer(3, 0, scene.material_indices_buffer);
     self.color_pipeline.setDescriptorBuffer(4, 0, scene.draw_indirect_buffer);
@@ -1063,7 +1130,11 @@ pub fn createScene(
     self.cull_pipeline.setDescriptorBuffer(4, 0, scene.draw_indirect_count_buffer);
     self.cull_pipeline.setDescriptorBuffer(5, 0, scene.input_draw_buffer);
 
-    scene.draw_count = 0;
+    scene.max_draw_count = max_mesh_draw_count;
+    scene.static_draw_count = 0;
+    scene.dynamic_draw_count = 0;
+    scene.static_draw_offset = 0;
+    scene.dynamic_draw_offset = 0;
 
     try self.scenes.append(self.allocator, scene);
 
@@ -1079,23 +1150,49 @@ pub fn destroyScene(scene: SceneHandle) void
     defer scene_data.input_draw_buffer.deinit();
     defer scene_data.transforms_buffer.deinit();
     defer scene_data.material_indices_buffer.deinit();
+    defer if (scene_data.environment_enabled) scene_data.environment_image.deinit();
+    defer if (scene_data.environment_enabled) scene_data.environment_sampler.deinit();
 } 
 
-// ///Begin rendering preparation for the scene 
-// pub fn beginSceneRender(scene: SceneHandle, active_views: []const View) void 
-// { 
-//     const scene_data: *Scene = &self.scenes.items[@enumToInt(scene)];
+pub fn sceneAddStaticMesh(
+    scene: SceneHandle, 
+    mesh: MeshHandle,
+    material: MaterialHandle,
+    transform: zalgebra.Mat4x4(f32),
+) !void 
+{
+    const scene_data: *Scene = &self.scenes.items[@enumToInt(scene)];
 
-//     _ = active_views;
+    //Should really check if the transfer command buffer is pending
+    if (self.image_staging_fence.getStatus() == false)
+    {
+        const material_data = self.materials.items[@enumToInt(material)];
+        const event: graphics.Event = self.image_transfer_events.items[material_data.albedo_texture_index];
 
-//     scene_data.draw_count = 0;
-// }
+        //If the texture is still being transfered by the transfer hardware, don't draw
+        if (event.getStatus() == false)
+        {
+            // return;
+        }
+    }
 
-// ///End the rendering preparation for a scene and submit
-// pub fn endSceneRender() void 
-// {
+    const draw_offset = scene_data.static_draw_offset + scene_data.static_draw_count;
 
-// }
+    scene_data.input_draws[draw_offset] = .{
+        .mesh_index = @enumToInt(mesh),
+    };
+
+    scene_data.transforms[draw_offset] = .{
+        transform.data[0][0..3].*,
+        transform.data[1][0..3].*,
+        transform.data[2][0..3].*,
+        transform.data[3][0..3].*,
+    };
+
+    scene_data.material_indices[draw_offset] = @enumToInt(material);
+
+    scene_data.static_draw_count += 1;    
+} 
 
 pub fn sceneDrawMesh(
     scene: SceneHandle,
@@ -1115,30 +1212,30 @@ pub fn sceneDrawMesh(
         //If the texture is still being transfered by the transfer hardware, don't draw
         if (event.getStatus() == false)
         {
-            return;
+            // return;
         }
     }
 
-    scene_data.input_draws[scene_data.draw_count] = .{
+    scene_data.input_draws[scene_data.dynamic_draw_count] = .{
         .mesh_index = @enumToInt(mesh),
     };
 
-    scene_data.transforms[scene_data.draw_count] = .{
+    scene_data.transforms[scene_data.dynamic_draw_count] = .{
         transform.data[0][0..3].*,
         transform.data[1][0..3].*,
         transform.data[2][0..3].*,
         transform.data[3][0..3].*,
     };
 
-    scene_data.material_indices[scene_data.draw_count] = @enumToInt(material);
+    scene_data.material_indices[scene_data.dynamic_draw_count] = @enumToInt(material);
 
-    scene_data.draw_count += 1;
+    scene_data.dynamic_draw_count += 1;
 }
 
 const Mesh = extern struct 
 {
     vertex_offset: u32,
-    vertex_count: u32,
+    vertex_count: u32,   
     lod_offset: u32,
     lod_count: u32,
     bounding_box_center: [3]f32,
@@ -1255,6 +1352,7 @@ pub fn createMaterial(
     const material_handle = @intCast(u32, self.materials.items.len);
 
     var albedo_image = try Image.init(
+        .@"2d",
         albedo_texture_width orelse 1, 
         albedo_texture_height orelse 1, 
         1, 
@@ -1309,41 +1407,6 @@ pub const Vertex = extern struct
     color: u32,
     uv: [2]f32,
 };
-
-pub fn drawMesh(
-    mesh: MeshHandle,
-    material: MaterialHandle,
-    transform: zalgebra.Mat4x4(f32),
-) void 
-{
-    //Should really check if the transfer command buffer is pending
-    if (self.image_staging_fence.getStatus() == false)
-    {
-        const material_data = self.materials.items[@enumToInt(material)];
-        const event: graphics.Event = self.image_transfer_events.items[material_data.albedo_texture_index];
-
-        //If the texture is still being transfered by the transfer hardware, don't draw
-        if (event.getStatus() == false)
-        {
-            return;
-        }
-    }
-
-    self.input_draws[self.draw_index] = .{
-        .mesh_index = @enumToInt(mesh),
-    };
-
-    self.transforms[self.draw_index] = .{
-        transform.data[0][0..3].*,
-        transform.data[1][0..3].*,
-        transform.data[2][0..3].*,
-        transform.data[3][0..3].*,
-    };
-
-    self.material_indices[self.draw_index] = @enumToInt(material);
-
-    self.draw_index += 1;
-}
 
 pub const Statistics = struct 
 {

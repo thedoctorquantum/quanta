@@ -550,10 +550,10 @@ pub fn copyBufferToImage(self: CommandBuffer, source: Buffer, destination: Image
                     },
                     .mip_level = 0,
                     .base_array_layer = 0,
-                    .layer_count = 1,
+                    .layer_count = if (destination.@"type" == .cube) 6 else 1,
                 },
                 .image_offset = .{ .x = 0, .y = 0, .z = 0, },
-                .image_extent = .{ .width = destination.width, .height = destination.height, .depth = destination.depth },
+                .image_extent = .{ .width = destination.width, .height = destination.height, .depth = if (destination.@"type" == .cube) 1 else destination.depth },
             }
         },
     });

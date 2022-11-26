@@ -7,6 +7,7 @@ const CommandBuffer = @import("CommandBuffer.zig");
 const Buffer = @import("Buffer.zig");
 
 handle: vk.Image,
+@"type": Type,
 view: vk.ImageView,
 memory: vk.DeviceMemory,
 size: usize,
@@ -19,6 +20,7 @@ depth: u32,
 levels: u32,
 
 pub fn initData(
+    @"type": Type,
     data: []const u8,
     width: u32,
     height: u32,
@@ -29,7 +31,7 @@ pub fn initData(
     usage: vk.ImageUsageFlags,
 ) !Image
 {
-    var image = try init(width, height, depth, levels, format, layout, usage);
+    var image = try init(@"type", width, height, depth, levels, format, layout, usage);
     errdefer image.deinit();
 
     var source_buffer = try Buffer.init(image.size, .staging);
@@ -58,7 +60,19 @@ pub fn initData(
     return image;
 }
 
+pub const Type = enum 
+{
+    @"1d",
+    @"2d",
+    @"3d",
+    cube,
+    @"1d_array",
+    @"2d_array",
+    cube_array,
+};
+
 pub fn init(
+    @"type": Type,
     width: u32,
     height: u32,
     depth: u32,
@@ -71,6 +85,7 @@ pub fn init(
     var self = Image
     {
         .handle = .null_handle,
+        .@"type" = @"type",
         .view = .null_handle,
         .memory = .null_handle,
         .format = format,
@@ -89,12 +104,25 @@ pub fn init(
     self.handle = try Context.self.vkd.createImage(
         Context.self.device, 
         &.{
-            .flags = .{ .@"alias_bit" = true, },
-            .image_type = .@"2d",
+            .flags = vk.ImageCreateFlags 
+            { 
+                .@"alias_bit" = true, 
+                .cube_compatible_bit = @"type" == .cube 
+            },
+            .image_type = @as(vk.ImageType, switch (@"type")
+            {
+                .@"1d" => .@"1d",
+                .@"2d" => .@"2d",
+                .@"3d" => .@"3d",
+                .cube => .@"2d",
+                .@"1d_array" => .@"2d",
+                .@"2d_array" => .@"3d",
+                .cube_array => .@"3d",
+            }),
             .format = format,
-            .extent = .{ .width = width, .height = height, .depth = depth },
+            .extent = .{ .width = width, .height = height, .depth = if (@"type" == .cube) 1 else depth },
             .mip_levels = levels,
-            .array_layers = 1,
+            .array_layers = if (@"type" == .cube) depth else 1,
             .samples = .{ .@"1_bit" = true, },
             .tiling = .optimal,
             .usage = usage,
@@ -121,7 +149,16 @@ pub fn init(
         &.{
             .flags = .{},
             .image = self.handle,
-            .view_type = .@"2d",
+            .view_type = @as(vk.ImageViewType, switch (@"type")
+            {
+                .@"1d" => .@"1d",
+                .@"2d" => .@"2d",
+                .@"3d" => .@"3d",
+                .cube => .cube,
+                .@"1d_array" => .@"1d_array",
+                .@"2d_array" => .@"2d_array",
+                .cube_array => .cube_array,
+            }),
             .format = self.format,
             .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
             .subresource_range = .{
@@ -129,7 +166,7 @@ pub fn init(
                 .base_mip_level = 0,
                 .level_count = levels,
                 .base_array_layer = 0,
-                .layer_count = 1,
+                .layer_count = vk.REMAINING_ARRAY_LAYERS,
             },
         }, 
         &Context.self.allocation_callbacks
