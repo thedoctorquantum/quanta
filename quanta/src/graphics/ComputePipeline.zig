@@ -102,7 +102,7 @@ pub fn init(
 
     for (descriptor_set_layout_binding_flags) |*binding_flags|
     {
-        binding_flags.* = .{ .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, };
+        binding_flags.* = vk.DescriptorBindingFlags { .update_after_bind_bit = true, .partially_bound_bit = true, .update_unused_while_pending_bit = true, };
     }
 
     const descriptor_pool_sizes = try allocator.alloc(vk.DescriptorPoolSize, shader_parse_result.resource_count);
@@ -151,7 +151,7 @@ pub fn init(
     };
 
     self.descriptor_pool = try Context.self.vkd.createDescriptorPool(Context.self.device, &.{
-        .flags = .{ .update_after_bind_bit = true,  },
+        .flags = .{ .update_after_bind_bit = true, },
         .max_sets = 1,
         .pool_size_count = @intCast(u32, descriptor_pool_sizes.len),
         .p_pool_sizes = descriptor_pool_sizes.ptr,

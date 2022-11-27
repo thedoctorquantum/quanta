@@ -5,7 +5,7 @@ layout(push_constant) uniform Constants
     mat4 view_projection;
 } constants;
 
-layout(location = 0) out Out
+out Out
 {
     vec3 uv;
 } out_data;

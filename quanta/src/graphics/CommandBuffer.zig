@@ -154,6 +154,8 @@ pub const ResourceAccess = packed struct
     depth_attachment_write: bool = false,
     shader_read: bool = false,
     shader_write: bool = false, 
+    shader_storage_read: bool = false,
+    shader_storage_write: bool = false,
     indirect_command_read: bool = false,
     transfer_read: bool = false,
     transfer_write: bool = false,
@@ -179,6 +181,8 @@ inline fn getVkResourceAccess(resource_access: ResourceAccess) vk.AccessFlags2
         .host_write_bit = false,
         .memory_read_bit = false,
         .memory_write_bit = false,
+        .shader_storage_read_bit = resource_access.shader_storage_read,
+        .shader_storage_write_bit = resource_access.shader_storage_write,
         .indirect_command_read_bit = resource_access.indirect_command_read,
     };
 }

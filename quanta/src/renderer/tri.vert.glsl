@@ -51,7 +51,7 @@ layout(set = 0, binding = 4, scalar) restrict readonly buffer DrawCommands
     DrawIndexedIndirectCommand draw_commands[];
 };
 
-layout(location = 0) out Out
+out Out
 {
     flat uint material_index;
     flat uint primitive_index;

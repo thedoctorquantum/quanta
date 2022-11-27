@@ -19,7 +19,7 @@ layout(push_constant) uniform PushConstants
     uint texture_index;
 } push_constants;
 
-layout(location = 0) out Out 
+out Out 
 {
     vec2 uv;
     vec4 color;

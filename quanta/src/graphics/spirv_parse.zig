@@ -168,7 +168,8 @@ pub fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocato
             (
                 id.storage_class == spirv.SpvStorageClassUniform or 
                 id.storage_class == spirv.SpvStorageClassUniformConstant or 
-                id.storage_class == spirv.SpvStorageClassStorageBuffer 
+                id.storage_class == spirv.SpvStorageClassStorageBuffer or
+                id.storage_class == spirv.SpvStorageClassImage 
             )
         )
         {

@@ -2,7 +2,7 @@
 #extension GL_EXT_scalar_block_layout : enable
 #extension GL_EXT_nonuniform_qualifier : enable
 
-layout(location = 0) in Out
+in Out
 {
     flat uint material_index;
     flat uint primitive_index;
@@ -10,7 +10,7 @@ layout(location = 0) in Out
     vec2 uv;
 } in_data;
 
-layout(location = 0) out vec4 output_color;
+out vec4 output_color;
 
 struct Material
 {

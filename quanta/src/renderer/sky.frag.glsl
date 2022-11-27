@@ -1,11 +1,11 @@
 #version 450
 
-layout(location = 0) in Out
+in Out
 {
     vec3 uv;
 } in_data;
 
-layout(location = 0) out vec4 out_color;
+out vec4 out_color;
 
 layout(binding = 0) uniform samplerCube environment_sampler;
 

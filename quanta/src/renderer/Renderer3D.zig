@@ -24,6 +24,7 @@ const ColorPassPushConstants = extern struct
 const DepthReducePushData = extern struct 
 {
     image_size: [2]f32,
+	image_index: u32,
 };
 
 const DrawCullPushConstants = extern struct 
@@ -176,6 +177,17 @@ fn initFrameImages(window_width: u32, window_height: u32) !void
     for (self.depth_pyramid_levels) |*pyramid_level, i|
     {
         pyramid_level.* = try self.depth_pyramid.createView(@intCast(u32, i), 1);
+
+        if (i == 0)
+        {
+            self.depth_reduce_pipeline.setDescriptorImageSampler(1, 0, self.depth_image, self.depth_reduce_sampler);
+        }
+        else 
+        {
+            self.depth_reduce_pipeline.setDescriptorImageViewSampler(1, @intCast(u32, i), self.depth_pyramid_levels[i - 1], self.depth_reduce_sampler);
+        }
+
+        self.depth_reduce_pipeline.setDescriptorImageView(0, @intCast(u32, i), self.depth_pyramid_levels[i]);
     }
 
     errdefer for (self.depth_pyramid_levels) |*pyramid_level|
@@ -211,6 +223,18 @@ pub fn init(
     self.vertex_position_staging_buffers = .{};
     self.vertex_staging_buffers = .{};
     self.index_staging_buffers = .{};
+
+    self.depth_reduce_pipeline = try graphics.ComputePipeline.init(
+        self.allocator, 
+        depth_reduce_comp_spv, 
+        .@"2d",
+        null,
+        DepthReducePushData
+    );
+    errdefer self.depth_reduce_pipeline.deinit(self.allocator);
+
+    self.depth_reduce_sampler = try graphics.Sampler.init(.nearest, .nearest, .min);
+    errdefer self.depth_reduce_sampler.deinit();
 
     try initFrameImages(window.getWidth(), window.getHeight());
     errdefer deinitFrameImages();
@@ -258,18 +282,6 @@ pub fn init(
 
     self.index_buffer = try graphics.Buffer.init(vertex_buffer_size, .index);
     errdefer self.index_buffer.deinit();
-
-    self.depth_reduce_sampler = try graphics.Sampler.init(.nearest, .nearest, .min);
-    errdefer self.depth_reduce_sampler.deinit();
-
-    self.depth_reduce_pipeline = try graphics.ComputePipeline.init(
-        self.allocator, 
-        depth_reduce_comp_spv, 
-        .@"2d",
-        null,
-        DepthReducePushData
-    );
-    errdefer self.depth_reduce_pipeline.deinit(self.allocator);
 
     self.cull_pipeline = try graphics.ComputePipeline.init(
         self.allocator, 
@@ -802,7 +814,6 @@ fn endRenderInternal(scene: SceneHandle) !void
         }
 
         //Depth reduce
-        if (true)
         {
             command_buffer.imageBarrier(self.depth_image, .{
                 .source_stage = .{ .late_fragment_tests = true },
@@ -822,31 +833,31 @@ fn endRenderInternal(scene: SceneHandle) !void
                 .destination_layout = .general,
             });
 
+            command_buffer.setComputePipeline(self.depth_reduce_pipeline);
+
             for (self.depth_pyramid_levels) |_, i|
             {
                 const pyramid_level_width: u32 = @max(1, self.depth_pyramid.width >> @intCast(u5, i));
                 const pyramid_level_height: u32 = @max(1, self.depth_pyramid.height >> @intCast(u5, i));
 
-                if (i == 0)
-                {
-                    self.depth_reduce_pipeline.setDescriptorImageSampler(1, 0, self.depth_image, self.depth_reduce_sampler);
-                }
-                else 
-                {
-                    self.depth_reduce_pipeline.setDescriptorImageViewSampler(1, 0, self.depth_pyramid_levels[i - 1], self.depth_reduce_sampler);
-                }
-
-                self.depth_reduce_pipeline.setDescriptorImageView(0, 0, self.depth_pyramid_levels[i]);
-
-                command_buffer.setComputePipeline(self.depth_reduce_pipeline);
-
                 command_buffer.setPushData(DepthReducePushData, .{
-                    .image_size = .{ @intToFloat(f32, pyramid_level_width), @intToFloat(f32, pyramid_level_height) }
+                    .image_size = .{ @intToFloat(f32, pyramid_level_width), @intToFloat(f32, pyramid_level_height) },
+                    .image_index = @intCast(u32, i),
                 });
                 command_buffer.computeDispatch(pyramid_level_width, pyramid_level_height, 1);
 
+                // command_buffer.imageBarrier(self.depth_pyramid, .{
+                    // .layer = @intCast(u32, i),
+                    // .source_stage = .{ .compute_shader = true },
+                //     .source_access = .{ .shader_storage_write = true },
+                //     .source_layout = .general,
+                //     .destination_stage = .{ .compute_shader = true },
+                //     .destination_access = .{ .shader_storage_read = true },
+                //     .destination_layout = .general,
+                // });
+
                 command_buffer.imageBarrier(self.depth_pyramid, .{
-                    .layer = @intCast(u32, i),
+                    .layer = 0,
                     .source_stage = .{ .compute_shader = true },
                     .source_access = .{ .shader_write = true },
                     .source_layout = .general,

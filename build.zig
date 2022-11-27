@@ -39,6 +39,7 @@ fn compileShaderSpecialized(
     args = args ++ &[_][]const u8 
     { 
         "glslc", 
+        "-fauto-map-locations",
         "--target-env=" ++ shader_target, 
         "-fshader-stage=" ++ stage, 
         source, 
