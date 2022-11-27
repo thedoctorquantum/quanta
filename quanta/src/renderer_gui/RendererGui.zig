@@ -81,25 +81,25 @@ pub fn createTexture(data: []const u8, width: u32, height: u32) !TextureHandle
 pub fn init(allocator: std.mem.Allocator, swapchain: graphics.Swapchain) !void 
 {
     self.allocator = allocator;
-    self.rectangle_pipeline = try graphics.GraphicsPipeline.init(
-        allocator, 
-        .{
-            .color_attachment_formats = &.{ swapchain.surface_format.format },
-            .vertex_shader_binary = @alignCast(4, @embedFile("spirv/rectangle.vert.spv")),
-            .fragment_shader_binary = @alignCast(4, @embedFile("spirv/rectangle.frag.spv")),
-            .depth_state = .{
-                .write_enabled = false,
-                .test_enabled = false,
-                .compare_op = .greater,
-            },
-            .rasterisation_state = .{
-                .polygon_mode = .fill,
-            },
-        },
-        null, 
-        RectanglePipelinePushData,
-    );
-    errdefer self.rectangle_pipeline.deinit(self.allocator);
+    // self.rectangle_pipeline = try graphics.GraphicsPipeline.init(
+    //     allocator, 
+    //     .{
+    //         .color_attachment_formats = &.{ swapchain.surface_format.format },
+    //         .vertex_shader_binary = @alignCast(4, @embedFile("spirv/rectangle.vert.spv")),
+    //         .fragment_shader_binary = @alignCast(4, @embedFile("spirv/rectangle.frag.spv")),
+    //         .depth_state = .{
+    //             .write_enabled = false,
+    //             .test_enabled = false,
+    //             .compare_op = .greater,
+    //         },
+    //         .rasterisation_state = .{
+    //             .polygon_mode = .fill,
+    //         },
+    //     },
+    //     null, 
+    //     RectanglePipelinePushData,
+    // );
+    // errdefer self.rectangle_pipeline.deinit(self.allocator);
 
     self.mesh_pipeline = try graphics.GraphicsPipeline.init(
         allocator, 
@@ -130,7 +130,7 @@ pub fn init(allocator: std.mem.Allocator, swapchain: graphics.Swapchain) !void
     self.rectangles_buffer = try graphics.Buffer.init(4096 * @sizeOf(Rectangle), .storage);
     errdefer self.rectangles_buffer.deinit();
     
-    self.rectangle_pipeline.setDescriptorBuffer(0, 0, self.rectangles_buffer);
+    // self.rectangle_pipeline.setDescriptorBuffer(0, 0, self.rectangles_buffer);
 
     const max_vertices = 50_000;
     const max_indices = 50_000;
@@ -182,7 +182,7 @@ fn deinitImGui() void
 
 pub fn deinit() void 
 {
-    defer self.rectangle_pipeline.deinit(self.allocator);
+    // defer self.rectangle_pipeline.deinit(self.allocator);
     defer self.mesh_pipeline.deinit(self.allocator);
     defer self.command_buffer.deinit();
     defer self.rectangles_buffer.deinit();

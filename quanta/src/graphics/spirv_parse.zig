@@ -22,6 +22,7 @@ pub const ShaderParseResult = struct
     local_size_x: u32 = 0,
     local_size_y: u32 = 0,
     local_size_z: u32 = 0,
+    entry_point: [:0]const u8,
 
     const Resource = struct 
     {
@@ -77,6 +78,14 @@ pub fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocato
         {
             spirv.SpvOpEntryPoint => {
                 std.log.info("Found shader entry point", .{});
+
+                const name_begin = @ptrCast([*:0]const u8, &words[3]);
+                
+                std.log.info("{c}", .{ name_begin[1] });
+
+                const name = std.mem.span(name_begin);
+
+                result.entry_point = name;
             },
             spirv.SpvOpExecutionMode => {},
             spirv.SpvOpExecutionModeId => {},
@@ -192,4 +201,6 @@ pub fn parseShaderModule(result: *ShaderParseResult, allocator: std.mem.Allocato
     {
         result.local_size_z = ids[local_size_z_id.?].constant;
     }
+
+    std.log.info("SPIRV entrypoint name: {s}", .{ result.entry_point });
 }

@@ -55,8 +55,8 @@ void main()
 {
     //Each rectangle will be rendered as 2 triangles
     // u32 rectangle_index = push_constants.rectangle_index + gl_InstanceIndex;
-    // Rectangle rectangle = rectangles[rectangle_index];
-    Rectangle rectangle = push_constants.rectangle;
+    Rectangle rectangle = rectangles[0];
+    // Rectangle rectangle = push_constants.rectangle;
 
     vec2 vertex_position = vec2(vertex_positions[gl_VertexIndex]);
 
@@ -78,7 +78,7 @@ void main()
     out_data.y = rectangle_y;
     out_data.width = rectangle_width;
     out_data.height = rectangle_height;
-    out_data.color = unpackUnorm4x8(rectangle.color);
+    out_data.color = unpackUnorm4x8(rectangle.color + rectangles[0].color);
     out_data.border_radius = rectangle.border_radius;
 
     gl_Position = vec4(vec3(vertex_position, 1), 1);

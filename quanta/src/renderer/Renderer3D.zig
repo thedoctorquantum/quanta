@@ -869,7 +869,12 @@ fn endRenderInternal(scene: SceneHandle) !void
             
         }
 
-        //Color pass #1
+        //Deferred Color Pass
+        {
+
+        }
+
+        //Forward Color Pass
         {
             command_buffer.imageBarrier(color_image, .{
                 .source_stage = .{ .all_commands = true },

@@ -129,14 +129,16 @@ void main()
     u32 read_draw_index = gl_GlobalInvocationID.x;
 
 	if (read_draw_index >= draw_count)
+    {
 		return;
+    }
 
     InputDraw draw = input_draws[read_draw_index];
     Mesh mesh = meshes[draw.mesh_index];
 
     bool visible = true;
 
-    // visible = visible && isOnFrustum(mat4(transforms[draw.mesh_index]), mesh.bounding_box_center, mesh.bounding_box_extents);
+    visible = visible && isOnFrustum(mat4(transforms[draw.mesh_index]), mesh.bounding_box_center, mesh.bounding_box_extents);
 
     if (visible)
     {

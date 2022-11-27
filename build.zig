@@ -28,10 +28,9 @@ fn compileShaderSpecialized(
 
     const shader_optimisation = switch (mode)
     {
-        //TODO: -O causes a crash in our spirv parsing code 
-        .ReleaseFast => "-O0",
+        .ReleaseFast => "-O",
         .ReleaseSafe => "-O",
-        .ReleaseSmall => "-O0",
+        .ReleaseSmall => "-Os",
         .Debug => "-O0",
     };
 
@@ -48,7 +47,7 @@ fn compileShaderSpecialized(
         shader_optimisation, 
     };
 
-    if (mode == .Debug or true)
+    if (mode == .Debug)
     {
         args = args ++ &[_][]const u8 
         {

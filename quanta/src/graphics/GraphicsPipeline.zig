@@ -214,8 +214,13 @@ pub fn init(
 
     var shader_parse_result: spirv_parse.ShaderParseResult = std.mem.zeroes(spirv_parse.ShaderParseResult);
 
-    try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.vertex_shader_binary.ptr)[0..options.vertex_shader_binary.len / 4]);
-    try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.fragment_shader_binary.ptr)[0..options.fragment_shader_binary.len / 4]);
+    try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.vertex_shader_binary.ptr)[0..options.vertex_shader_binary.len / @sizeOf(u32)]);
+
+    const vertex_shader_entry_point = shader_parse_result.entry_point;
+
+    try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, options.fragment_shader_binary.ptr)[0..options.fragment_shader_binary.len / @sizeOf(u32)]);
+
+    const fragment_shader_entry_point = shader_parse_result.entry_point;
 
     const vertex_binding_descriptions = [_]vk.VertexInputBindingDescription 
     {
@@ -342,8 +347,6 @@ pub fn init(
     );
     errdefer Context.self.vkd.destroyPipelineLayout(Context.self.device, self.layout, &Context.self.allocation_callbacks);
 
-    const shader_entry_point = "main";
-
     self.vertex_shader = try Context.self.vkd.createShaderModule(
         Context.self.device, 
         &.{
@@ -372,7 +375,7 @@ pub fn init(
             .flags = .{},
             .stage = .{ .vertex_bit = true },
             .module = self.vertex_shader,
-            .p_name = shader_entry_point,
+            .p_name = vertex_shader_entry_point.ptr,
             .p_specialization_info = &.{
                 .map_entry_count = 0,
                 .p_map_entries = undefined,
@@ -384,7 +387,7 @@ pub fn init(
             .flags = .{},
             .stage = .{ .fragment_bit = true },
             .module = self.fragment_shader,
-            .p_name = shader_entry_point,
+            .p_name = fragment_shader_entry_point.ptr,
             .p_specialization_info = &.{
                 .map_entry_count = 0,
                 .p_map_entries = undefined,

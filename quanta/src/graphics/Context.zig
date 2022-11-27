@@ -8,7 +8,6 @@ const log = @import("../log.zig").log;
 
 pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
-pub const enable_mangohud = builtin.mode == .Debug and false;
 pub const vulkan_version = std.builtin.Version { .major = 1, .minor = 3, .patch = 0, };
 
 pub const BaseDispatch = vk.BaseWrapper(.{
@@ -82,8 +81,6 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .mapMemory = true,
     .unmapMemory = true,
     .bindBufferMemory = true,
-    .cmdBeginRenderPass = true,
-    .cmdEndRenderPass = true,
     .cmdBindPipeline = true,
     .cmdDraw = true,
     .cmdSetViewport = true,
@@ -177,7 +174,6 @@ fn vulkanAllocate(
 ) callconv(vk.vulkan_call_conv) ?*anyopaque
 {
     _ = user_data;
-    // const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
 
     const memory = self.allocator.rawAlloc(size + @sizeOf(usize), @intCast(u29, alignment), 0, @returnAddress()) catch
     {
@@ -197,8 +193,6 @@ fn vulkanReallocate(
     _: vk.SystemAllocationScope
 ) callconv(vk.vulkan_call_conv) ?*anyopaque
 {
-    // const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
-
     _ = user_data;
 
     const original_pointer = @ptrCast([*]u8, original.?) - @sizeOf(usize);
@@ -225,8 +219,6 @@ fn vulkanFree(
     if (memory == null) return;
 
     _ = user_data;
-
-    // const self = @ptrCast(*Context, @alignCast(@alignOf(Context), user_data.?));
 
     const pointer = @ptrCast([*]u8, memory.?) - @sizeOf(usize);
     const size = @ptrCast(*usize, @alignCast(@alignOf(usize), pointer)).*;
@@ -276,10 +268,11 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         .linux, .freebsd => "libvulkan.so",
         .windows => "vulkan-1.dll",
         .macos => "libvulkan.1.dylib",
-        else => @compileError("Targeted os doesn't support the KHRONOS vulkan loader!"),
+        else => @compileError("Targeted os doesn't support the Khronos vulkan loader!"),
     };
 
     self.vulkan_loader = try std.DynLib.open(vulkan_loader_path);
+    errdefer self.vulkan_loader.close();
 
     vkGetInstanceProcAddr = self.vulkan_loader.lookup(@TypeOf(vkGetInstanceProcAddr), "vkGetInstanceProcAddr") orelse return error.LoaderProcedureNotFound;
 
@@ -308,11 +301,6 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
     log.info("Vulkan Instance Extentions: {s}", .{ instance_extentions });
 
     comptime var requested_layers: []const [*:0]const u8 = &.{};
-
-    if (enable_mangohud)
-    {
-        requested_layers = requested_layers ++ &[_][*:0]const u8 { "VK_LAYER_MANGOHUD_overlay" };
-    }
 
     if (enable_khronos_validation)
     {
@@ -803,7 +791,6 @@ pub fn deinit() void
 }
 
 pub fn imageMemoryBarrier(
-    //self: *Context, 
     command_buffer: vk.CommandBuffer, 
     image: vk.Image,
     src_stage: vk.PipelineStageFlags2,

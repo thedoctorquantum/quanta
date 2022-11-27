@@ -26,7 +26,7 @@ void main()
     vec2 edge_pos = vec2(in_data.x, in_data.y);
     vec2 circle_pos = edge_pos + in_data.border_radius;
 
-    output_color = in_data.color;
+    output_color = in_data.color * texture(samplers[nonuniformEXT(0)], vec2(0, 0));
     return;
 
     if (all(greaterThan(pos, circle_pos)))
