@@ -22,31 +22,7 @@ const graphics = quanta.graphics;
 const Renderer3D = quanta.renderer.Renderer3D;
 const RendererGui = quanta.renderer_gui.RendererGui;
 
-const shaders = @import("shaders.zig");
 const assets = @import("assets");
-
-fn packUnorm4x8(v: [4]f32) u32
-{
-    const Unorm4x8 = packed struct(u32)
-    {
-        x: u8,
-        y: u8,
-        z: u8,
-        w: u8,
-    };
-
-    const x = @floatToInt(u8, v[0] * @intToFloat(f32, std.math.maxInt(u8)));
-    const y = @floatToInt(u8, v[1] * @intToFloat(f32, std.math.maxInt(u8)));
-    const z = @floatToInt(u8, v[2] * @intToFloat(f32, std.math.maxInt(u8)));
-    const w = @floatToInt(u8, v[3] * @intToFloat(f32, std.math.maxInt(u8)));
-
-    return @bitCast(u32, Unorm4x8 {
-        .x = x,
-        .y = y,
-        .z = z, 
-        .w = w,
-    });
-}
 
 fn nkAlloc(_: nk.nk_handle, _: ?*anyopaque, size: nk.nk_size) callconv(.C) ?*anyopaque
 {
@@ -163,8 +139,7 @@ pub fn main() !void
 
     const asset_archive = try asset.Archive.decode(allocator, asset_archive_blob);
 
-    std.log.info("{any}", .{ asset_archive.assets.len });
-    std.log.info("{any}", .{ asset_archive.assets });
+    std.log.info("asset_archive.assets.len = {any}", .{ asset_archive.assets.len });
     
     const test_scene_blob = asset_archive.getAssetData(example_assets.sponza);
 
@@ -213,68 +188,6 @@ pub fn main() !void
         test_scene_materials[0] = try Renderer3D.createMaterial(null, null, null, .{ 1, 1, 1, 1 });
     }
 
-    const triangle_mesh = try Renderer3D.createMesh(
-        &[_][3]f32 
-        {
-            .{ 0.5, 0.5, 0 },
-            .{ -0.5, 0.5, 0 },
-            .{ 0, -0.5, 0 },
-        },
-        &[_]Renderer3D.Vertex
-        {
-            .{  
-                .normal = .{ 0, 0, 0 },
-                .color = packUnorm4x8(.{ 1, 0, 0, 1 }),
-                .uv = .{ 0, 0 },
-            },
-            .{  
-                .normal = .{ 0, 0, 0 },
-                .color = packUnorm4x8(.{ 0, 1, 0, 1 }),
-                .uv = .{ 1, 0 },
-            },
-            .{  
-                .normal = .{ 0, 0, 0 },
-                .color = packUnorm4x8(.{ 0, 0, 1, 0.25 }),
-                .uv = .{ 0.5, 1 },
-            },
-        }, 
-        &[_]u32 { 0, 1, 2 },
-        .{ 0, 0, 0 },
-        .{ 0, 0, 0 },
-    );
-
-    _ = triangle_mesh;
-
-    const second_mesh = try Renderer3D.createMesh(
-        &[_][3]f32 
-        {
-            .{ 0.5, 0.5, 0 },
-            .{ -0.5, 0.5, 0 },
-            .{ 0, -0.5, 0 },
-        },
-        &[_]Renderer3D.Vertex
-        {
-            .{  
-                .normal = .{ 0, 0, 0 },
-                .color = packUnorm4x8(.{ 1, 1, 1, 1 }),
-                .uv = .{ 0, 0 },
-            },
-            .{  
-                .normal = .{ 0, 0, 0 },
-                .color = packUnorm4x8(.{ 1, 1, 1, 1 }),
-                .uv = .{ 1, 0 },
-            },
-            .{  
-                .normal = .{ 0, 0, 0 },
-                .color = packUnorm4x8(.{ 1, 1, 1, 1 }),
-                .uv = .{ 0.5, 1 },
-            },
-        }, 
-        &[_]u32 { 0, 1, 2 },
-        .{ 0, 0, 0 },
-        .{ 0, 0, 0 },
-    );
-
     const environment_map_data = asset_archive.getAssetData(example_assets.environment_map);
 
     const scene = try Renderer3D.createScene(
@@ -294,8 +207,6 @@ pub fn main() !void
             quanta.math.zalgebra.Mat4 { .data = sub_mesh.transform }
         );
     }
-
-    _ = second_mesh;
 
     const target_frame_time: f32 = 16; 
 

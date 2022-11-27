@@ -25,6 +25,18 @@ pub const DispatchType = enum
     @"3d",
 };
 
+fn closestPowerOfTwo(x: f32) u32
+{
+    const v = @floatToInt(u32, @round(x));
+
+	var r: u32 = 1;
+
+	while (r * 2 < v)
+		r *= 2;
+
+	return r;
+} 
+
 pub fn init(
     allocator: std.mem.Allocator,
     shader_code: []align(4) const u8,
@@ -37,7 +49,16 @@ pub fn init(
 
     var shader_parse_result: spirv_parse.ShaderParseResult = std.mem.zeroes(spirv_parse.ShaderParseResult);
 
-    try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, shader_code.ptr)[0..shader_code.len / 4]);
+    try spirv_parse.parseShaderModule(&shader_parse_result, allocator, @ptrCast([*]const u32, shader_code.ptr)[0..shader_code.len / @sizeOf(u32)]);
+
+    //This should be close to optimal for most work loads, but not all
+    //This isn't a silver bullet, just a very sensible default
+    const optimal_local_size: u32 = switch (dispatch_type)
+    {
+        .@"1d" => Context.self.physical_device_properties.limits.max_compute_work_group_invocations,
+        .@"2d" => std.math.sqrt(Context.self.physical_device_properties.limits.max_compute_work_group_invocations),
+        .@"3d" => closestPowerOfTwo(std.math.cbrt(@intToFloat(f32, Context.self.physical_device_properties.limits.max_compute_work_group_invocations))),
+    };
 
     var self = ComputePipeline
     {
@@ -47,9 +68,9 @@ pub fn init(
         .descriptor_set_layouts = &.{},
         .descriptor_sets = &.{},
         .descriptor_pool = .null_handle,
-        .local_size_x = 32,
-        .local_size_y = 32,
-        .local_size_z = 32,
+        .local_size_x = optimal_local_size,
+        .local_size_y = optimal_local_size,
+        .local_size_z = optimal_local_size,
     };
 
     switch (dispatch_type)
@@ -190,7 +211,7 @@ pub fn init(
                         .compute_bit = true,
                     },
                     .module = self.compute_shader_module,
-                    .p_name = "main",
+                    .p_name = shader_parse_result.entry_point.ptr,
                     .p_specialization_info = &.{
                         .map_entry_count = 3,
                         .p_map_entries = &[_]vk.SpecializationMapEntry

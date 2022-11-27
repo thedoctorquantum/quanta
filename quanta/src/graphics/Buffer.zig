@@ -192,13 +192,6 @@ pub fn update(self: Buffer, comptime T: type, offset: usize, data: []const T) !v
     var staging = try initData(T, data, .staging);
     defer staging.deinit();
 
-    // {
-    //     const mapped_data = try staging.map(T);
-    //     defer staging.unmap();
-
-    //     @memcpy(@ptrCast([*]u8, mapped_data.ptr), @ptrCast([*]const u8, data.ptr), staging.size);
-    // }
-
     var command_buffer = try CommandBuffer.init(.graphics);
     defer command_buffer.deinit();
 

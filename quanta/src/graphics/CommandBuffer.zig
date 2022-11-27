@@ -526,11 +526,6 @@ pub fn fillBuffer(self: CommandBuffer, source: Buffer, offset: usize, size: usiz
     Context.self.vkd.cmdFillBuffer(self.handle, source.handle, offset, size, value);
 }
 
-// pub fn bufferBarrier(self: CommandBuffer, source: Buffer) void 
-// {
-
-// }
-
 pub fn copyBufferToImage(self: CommandBuffer, source: Buffer, destination: Image) void
 {
     Context.self.vkd.cmdCopyBufferToImage2(self.handle, &.{
@@ -557,42 +552,6 @@ pub fn copyBufferToImage(self: CommandBuffer, source: Buffer, destination: Image
             }
         },
     });
-
-    // //We may want to give the caller control over this barrier 
-    // Context.self.vkd.cmdPipelineBarrier2(
-    //     self.handle, 
-    //     &.{
-    //         .dependency_flags = .{ .by_region_bit = true, },
-    //         .memory_barrier_count = 0,
-    //         .p_memory_barriers = undefined,
-    //         .buffer_memory_barrier_count = 0,
-    //         .p_buffer_memory_barriers = undefined,
-    //         .image_memory_barrier_count = 1,
-    //         .p_image_memory_barriers = @ptrCast([*]const vk.ImageMemoryBarrier2, &vk.ImageMemoryBarrier2
-    //         {
-    //             .src_stage_mask = .{
-    //                 .copy_bit = true,
-    //             },
-    //             .dst_access_mask = .{},
-    //             .dst_stage_mask = .{},
-    //             .src_access_mask = .{
-    //                 .transfer_write_bit = true,
-    //             },
-    //             .old_layout = .transfer_dst_optimal,
-    //             .new_layout = destination.layout,
-    //             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-    //             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
-    //             .image = destination.handle,
-    //             .subresource_range = .{
-    //                 .aspect_mask = destination.aspect_mask,
-    //                 .base_mip_level = 0,
-    //                 .level_count = vk.REMAINING_MIP_LEVELS,
-    //                 .base_array_layer = 0,
-    //                 .layer_count = vk.REMAINING_ARRAY_LAYERS,
-    //             },
-    //         }),
-    //     }
-    // );
 }
 
 pub fn draw(
