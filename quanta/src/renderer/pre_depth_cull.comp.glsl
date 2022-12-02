@@ -54,7 +54,7 @@ layout(set = 0, binding = 3, scalar) restrict writeonly buffer DrawCommands
     DrawIndexedIndirectCommand draw_commands[];
 };
 
-layout(set = 0, binding = 4) buffer DrawCommandCount
+layout(set = 0, binding = 4, scalar) buffer DrawCommandCount
 {
 	u32 draw_command_count;
 };
@@ -69,6 +69,18 @@ layout(set = 0, binding = 5, scalar) restrict readonly buffer InputDraws
     InputDraw input_draws[];
 };
 
+struct DispatchIndirectCommand
+{
+    u32 group_count_x;
+    u32 group_count_y;
+    u32 group_count_z;
+}; 
+
+layout(set = 0, binding = 6, scalar) restrict buffer PostDepthDispatchCommand
+{
+    DispatchIndirectCommand post_depth_dispatch_command;
+};
+
 layout(push_constant, scalar) uniform PushConstants
 {
     u32 draw_count;
@@ -80,6 +92,8 @@ layout(push_constant, scalar) uniform PushConstants
     vec4 left_face;
     vec4 top_face;
     vec4 bottom_face;
+
+    u32 post_depth_local_size_x;
 };
 
 bool isOnOrForwardPlane(vec4 plan, vec3 center, vec3 extents)
@@ -138,13 +152,15 @@ void main()
 
     bool visible = true;
 
-    visible = visible && isOnFrustum(mat4(transforms[draw.mesh_index]), mesh.bounding_box_center, mesh.bounding_box_extents);
+    // visible = visible && isOnFrustum(mat4(transforms[draw.mesh_index]), mesh.bounding_box_center, mesh.bounding_box_extents);
 
     if (visible)
     {
         MeshLod mesh_lod = mesh_lods[mesh.lod_begin];
 
         u32 write_draw_index = atomicAdd(draw_command_count, 1);
+
+        atomicExchange(post_depth_dispatch_command.group_count_x, (write_draw_index + 1 + post_depth_local_size_x - 1) / post_depth_local_size_x);
 
         draw_commands[write_draw_index].first_index = mesh_lod.index_offset;
         draw_commands[write_draw_index].index_count = mesh_lod.index_count;

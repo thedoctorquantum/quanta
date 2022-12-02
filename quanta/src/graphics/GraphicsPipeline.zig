@@ -612,7 +612,7 @@ pub fn setDescriptorBuffer(
         .index => .storage_buffer,
         .uniform => .uniform_buffer,
         .storage => .storage_buffer,
-        .indirect_draw => .storage_buffer,
+        .indirect => .storage_buffer,
         .staging => unreachable,
     };
 

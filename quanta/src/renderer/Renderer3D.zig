@@ -10,7 +10,6 @@ const vk = graphics.vulkan;
 const zalgebra = @import("zalgebra");
 const options = @import("options");
 
-const cull_comp_spv = @alignCast(4, @embedFile("spirv/cull.comp.spv"));
 const depth_reduce_comp_spv = @alignCast(4, @embedFile("spirv/depth_reduce.comp.spv"));
 
 const depth_vert_spv = @alignCast(4, @embedFile("spirv/depth.vert.spv"));
@@ -36,6 +35,12 @@ const DrawCullPushConstants = extern struct
     left_face: [4]f32,
     top_face: [4]f32,
     bottom_face: [4]f32,
+    post_depth_local_size_x: u32,
+};
+
+const PostDepthCullPushConstants = extern struct 
+{
+    post_depth_draw_command_offset: u32,
 };
 
 const InputDraw = extern struct 
@@ -82,6 +87,7 @@ depth_reduce_sampler: graphics.Sampler,
 
 depth_reduce_pipeline: graphics.ComputePipeline,
 cull_pipeline: graphics.ComputePipeline,
+post_depth_cull_pipeline: graphics.ComputePipeline,
 depth_pipeline: graphics.GraphicsPipeline,
 color_pipeline: graphics.GraphicsPipeline,
 sky_pipeline: graphics.GraphicsPipeline,
@@ -285,12 +291,24 @@ pub fn init(
 
     self.cull_pipeline = try graphics.ComputePipeline.init(
         self.allocator, 
-        cull_comp_spv, 
+        @alignCast(4, @embedFile("spirv/pre_depth_cull.comp.spv")), 
         .@"1d",
         null,
         DrawCullPushConstants
     );
     errdefer self.cull_pipeline.deinit(self.allocator);
+
+    self.post_depth_cull_pipeline = try graphics.ComputePipeline.init(
+        self.allocator, 
+        @alignCast(4, @embedFile("spirv/post_depth_cull.comp.spv")), 
+        .@"1d",
+        null,
+        PostDepthCullPushConstants
+    );
+    errdefer self.post_depth_cull_pipeline.deinit(self.allocator);
+
+    self.post_depth_cull_pipeline.setDescriptorBuffer(1, 0, self.mesh_buffer);
+    self.post_depth_cull_pipeline.setDescriptorImageSampler(2, 0, self.depth_pyramid, self.depth_reduce_sampler);
 
     self.color_pipeline = try graphics.GraphicsPipeline.init(
         self.allocator,
@@ -399,6 +417,32 @@ pub fn deinit() void
     {
         command_buffer.deinit();
     };
+
+    for (self.image_staging_buffers.items) |*staging_buffer|
+    {
+        staging_buffer.deinit();
+    }
+
+    for (self.image_transfer_events.items) |*event|
+    {
+        event.deinit();
+    }
+
+    for (self.vertex_position_staging_buffers.items) |*staging|
+    {
+        staging.deinit();
+    }
+
+    for (self.vertex_staging_buffers.items) |*staging|
+    {
+        staging.deinit();
+    }
+
+    for (self.index_staging_buffers.items) |*staging|
+    {
+        staging.deinit();
+    }
+    
     defer self.image_staging_buffers.deinit(self.allocator);
     defer self.transfer_command_buffer.deinit();
     defer self.image_staging_fence.deinit();
@@ -415,6 +459,7 @@ pub fn deinit() void
     defer self.depth_reduce_sampler.deinit();
     defer self.depth_reduce_pipeline.deinit(self.allocator);
     defer self.cull_pipeline.deinit(self.allocator);
+    defer self.post_depth_cull_pipeline.deinit(self.allocator);
     defer self.depth_pipeline.deinit(self.allocator);
     defer self.color_pipeline.deinit(self.allocator);
     defer self.sky_pipeline.deinit(self.allocator);
@@ -468,7 +513,7 @@ pub fn beginSceneRender(scene: SceneHandle, active_views: []const View) !void
 
                     for (self.vertex_position_staging_buffers.items) |staging_buffer|
                     {
-                        self.transfer_command_buffer.copyBuffer(staging_buffer, 0, self.vertex_position_buffer, offset);
+                        self.transfer_command_buffer.copyBuffer(staging_buffer, 0, staging_buffer.size, self.vertex_position_buffer, offset, self.vertex_position_buffer.size);
 
                         offset += staging_buffer.size;
                     }
@@ -479,7 +524,7 @@ pub fn beginSceneRender(scene: SceneHandle, active_views: []const View) !void
 
                     for (self.vertex_staging_buffers.items) |staging_buffer|
                     {
-                        self.transfer_command_buffer.copyBuffer(staging_buffer, 0, self.vertex_buffer, offset);
+                        self.transfer_command_buffer.copyBuffer(staging_buffer, 0, staging_buffer.size, self.vertex_buffer, offset, self.vertex_buffer.size);
 
                         offset += staging_buffer.size;
                     }
@@ -490,7 +535,7 @@ pub fn beginSceneRender(scene: SceneHandle, active_views: []const View) !void
 
                     for (self.index_staging_buffers.items) |staging_buffer|
                     {
-                        self.transfer_command_buffer.copyBuffer(staging_buffer, 0, self.index_buffer, offset);
+                        self.transfer_command_buffer.copyBuffer(staging_buffer, 0, staging_buffer.size, self.index_buffer, offset, self.index_buffer.size);
 
                         offset += staging_buffer.size;
                     }
@@ -712,7 +757,7 @@ fn endRenderInternal(scene: SceneHandle) !void
 
             command_buffer.setComputePipeline(self.cull_pipeline);
             
-            command_buffer.fillBuffer(scene_data.draw_indirect_count_buffer, 0, @sizeOf(u32), 0);
+            command_buffer.fillBuffer(scene_data.draw_indirect_count_buffer, 0, @sizeOf(u32) * 2, 0);
 
             command_buffer.bufferBarrier(scene_data.draw_indirect_count_buffer, .{
                 .source_stage = .{ .copy = true },
@@ -742,6 +787,7 @@ fn endRenderInternal(scene: SceneHandle) !void
                 .left_face = left_face,
                 .top_face = top_face,
                 .bottom_face = bottom_face,
+                .post_depth_local_size_x = self.post_depth_cull_pipeline.local_size_x,
             });
             command_buffer.computeDispatch(scene_data.static_draw_count + scene_data.dynamic_draw_count, 1, 1);
 
@@ -846,16 +892,6 @@ fn endRenderInternal(scene: SceneHandle) !void
                 });
                 command_buffer.computeDispatch(pyramid_level_width, pyramid_level_height, 1);
 
-                // command_buffer.imageBarrier(self.depth_pyramid, .{
-                    // .layer = @intCast(u32, i),
-                    // .source_stage = .{ .compute_shader = true },
-                //     .source_access = .{ .shader_storage_write = true },
-                //     .source_layout = .general,
-                //     .destination_stage = .{ .compute_shader = true },
-                //     .destination_access = .{ .shader_storage_read = true },
-                //     .destination_layout = .general,
-                // });
-
                 command_buffer.imageBarrier(self.depth_pyramid, .{
                     .layer = 0,
                     .source_stage = .{ .compute_shader = true },
@@ -868,16 +904,42 @@ fn endRenderInternal(scene: SceneHandle) !void
             }
         }
 
-        // command_buffer.memoryBarrier(.{
-        //     .source_stage = .{ .late_fragment_tests = true },
-        //     .source_access = .{ .depth_attachment_write = true },
-        //     .destination_stage = .{ .early_fragment_tests = true },
-        //     .destination_access = .{ .depth_attachment_read = true },
-        // });
-
         //Post depth per instance cull #1
         {
-            
+            command_buffer.bufferBarrier(scene_data.draw_indirect_buffer, .{
+                .source_stage = .{ .draw_indirect = true, .vertex_shader = true },
+                .source_access = .{ .indirect_command_read = true, .shader_read = true },
+                .destination_stage = .{ .compute_shader = true },
+                .destination_access = .{ .shader_write = true, .shader_read = true },
+            });
+
+            command_buffer.bufferBarrier(scene_data.post_depth_cull_dispatch_buffer, .{
+                .source_stage = .{ .compute_shader = true },
+                .source_access = .{ .shader_write = true },
+                .destination_stage = .{  .compute_shader = true  },
+                .destination_access = .{ .shader_read = true },
+            });
+
+            command_buffer.setComputePipeline(self.post_depth_cull_pipeline);
+            command_buffer.setPushData(PostDepthCullPushConstants, .{ .post_depth_draw_command_offset = scene_data.post_depth_draw_command_offset });
+            //Use dispatch indirect to set count in pre-depth cull instead of conservatively
+            command_buffer.computeDispatch(scene_data.static_draw_count + scene_data.dynamic_draw_count, 1, 1);
+
+            // command_buffer.computeDispatchIndirect(scene_data.post_depth_cull_dispatch_buffer, 0);
+
+            command_buffer.bufferBarrier(scene_data.draw_indirect_buffer, .{
+                .source_stage = .{ .compute_shader = true },
+                .source_access = .{ .shader_write = true },
+                .destination_stage = .{ .draw_indirect = true, .vertex_shader = true },
+                .destination_access = .{ .indirect_command_read = true, .shader_read = true },
+            });
+
+            command_buffer.bufferBarrier(scene_data.draw_indirect_count_buffer, .{
+                .source_stage = .{ .compute_shader = true },
+                .source_access = .{ .shader_write = true },
+                .destination_stage = .{ .draw_indirect = true },
+                .destination_access = .{ .indirect_command_read = true },
+            });
         }
 
         //Deferred Color Pass
@@ -909,6 +971,7 @@ fn endRenderInternal(scene: SceneHandle) !void
                 .{
                     .image = &self.depth_image,
                     .clear = null,
+                    .store = false,
                 }
             );
             defer command_buffer.endRenderPass();
@@ -927,14 +990,30 @@ fn endRenderInternal(scene: SceneHandle) !void
                 .top_of_pipe_bit = true,
             }, self.timeline_query_pool, 2);
 
-            command_buffer.drawIndexedIndirectCount(
-                scene_data.draw_indirect_buffer, 
-                0, 
-                @sizeOf(DrawCommand),
-                scene_data.draw_indirect_count_buffer,
-                0,
-                scene_data.static_draw_count + scene_data.dynamic_draw_count
-            );
+            const use_occlusion_culling = false;
+
+            if (use_occlusion_culling)
+            {
+                command_buffer.drawIndexedIndirectCount(
+                    scene_data.draw_indirect_buffer, 
+                    scene_data.post_depth_draw_command_offset * @sizeOf(DrawCommand), 
+                    @sizeOf(DrawCommand),
+                    scene_data.draw_indirect_count_buffer,
+                    @sizeOf(u32),
+                    scene_data.static_draw_count + scene_data.dynamic_draw_count
+                );
+            }
+            else 
+            {
+                command_buffer.drawIndexedIndirectCount(
+                    scene_data.draw_indirect_buffer, 
+                    0, 
+                    @sizeOf(DrawCommand),
+                    scene_data.draw_indirect_count_buffer,
+                    0,
+                    scene_data.static_draw_count + scene_data.dynamic_draw_count
+                );
+            }
 
             if (scene_data.environment_enabled)
             {
@@ -1056,6 +1135,9 @@ const Scene = struct
 
     draw_indirect_buffer: graphics.Buffer,
     draw_indirect_count_buffer: graphics.Buffer,
+    post_depth_cull_dispatch_buffer: graphics.Buffer,
+
+    post_depth_draw_command_offset: u32,
 
     environment_image: graphics.Image,
     environment_sampler: graphics.Sampler,
@@ -1088,11 +1170,26 @@ pub fn createScene(
 
     const command_count = max_mesh_draw_count;
 
-    scene.draw_indirect_buffer = try graphics.Buffer.init(command_count * @sizeOf(DrawCommand), .indirect_draw);
+    scene.draw_indirect_buffer = try graphics.Buffer.init(command_count * @sizeOf(DrawCommand), .indirect);
     errdefer scene.draw_indirect_buffer.deinit();
 
-    scene.draw_indirect_count_buffer = try graphics.Buffer.init(@sizeOf(u32), .indirect_draw);
+    scene.draw_indirect_count_buffer = try graphics.Buffer.init(@sizeOf(u32) * 2, .indirect);
     errdefer scene.draw_indirect_count_buffer.deinit();
+
+    scene.post_depth_cull_dispatch_buffer = try graphics.Buffer.init(@sizeOf(graphics.CommandBuffer.DispatchIndirectCommand), .indirect);
+    errdefer scene.post_depth_cull_dispatch_buffer.deinit();
+
+    try scene.post_depth_cull_dispatch_buffer.update(
+        graphics.CommandBuffer.DispatchIndirectCommand, 0, &.{ 
+            .{  
+                .group_count_x = 0,
+                .group_count_y = 1,
+                .group_count_z = 1,
+            } 
+        }
+    );
+
+    scene.post_depth_draw_command_offset = command_count / 2;
 
     scene.input_draw_buffer = try graphics.Buffer.init(command_count * @sizeOf(InputDraw), .storage);
     errdefer scene.input_draw_buffer.deinit();
@@ -1145,6 +1242,11 @@ pub fn createScene(
     self.cull_pipeline.setDescriptorBuffer(3, 0, scene.draw_indirect_buffer);
     self.cull_pipeline.setDescriptorBuffer(4, 0, scene.draw_indirect_count_buffer);
     self.cull_pipeline.setDescriptorBuffer(5, 0, scene.input_draw_buffer);
+    self.cull_pipeline.setDescriptorBuffer(6, 0, scene.post_depth_cull_dispatch_buffer);
+
+    self.post_depth_cull_pipeline.setDescriptorBuffer(0, 0, scene.transforms_buffer);
+    self.post_depth_cull_pipeline.setDescriptorBuffer(3, 0, scene.draw_indirect_buffer);
+    self.post_depth_cull_pipeline.setDescriptorBuffer(4, 0, scene.draw_indirect_count_buffer);
 
     scene.max_draw_count = max_mesh_draw_count;
     scene.static_draw_count = 0;
@@ -1163,6 +1265,7 @@ pub fn destroyScene(scene: SceneHandle) void
 
     defer scene_data.draw_indirect_buffer.deinit();
     defer scene_data.draw_indirect_count_buffer.deinit();
+    defer scene_data.post_depth_cull_dispatch_buffer.deinit();
     defer scene_data.input_draw_buffer.deinit();
     defer scene_data.transforms_buffer.deinit();
     defer scene_data.material_indices_buffer.deinit();

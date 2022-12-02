@@ -28,7 +28,7 @@ fn compileShaderSpecialized(
 
     const shader_optimisation = switch (mode)
     {
-        .ReleaseFast => "-O",
+        .ReleaseFast => "-O0",
         .ReleaseSafe => "-O",
         .ReleaseSmall => "-Os",
         .Debug => "-O0",
@@ -91,7 +91,8 @@ fn preBuildQuanta(mode: std.builtin.Mode, builder: *std.build.Builder) !PreBuild
     const renderer_sky_frag_glsl = try compileShader(builder, mode, "frag", "quanta/src/renderer/sky.frag.glsl", "quanta/src/renderer/spirv/sky.frag.spv");
     const renderer_depth_vert_glsl = try compileShader(builder, mode, "vert", "quanta/src/renderer/depth.vert.glsl", "quanta/src/renderer/spirv/depth.vert.spv");
     const renderer_depth_frag_glsl = try compileShader(builder, mode, "frag", "quanta/src/renderer/depth.frag.glsl", "quanta/src/renderer/spirv/depth.frag.spv");
-    const renderer_cull_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/cull.comp.glsl", "quanta/src/renderer/spirv/cull.comp.spv");
+    const renderer_pre_depth_cull_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/pre_depth_cull.comp.glsl", "quanta/src/renderer/spirv/pre_depth_cull.comp.spv");
+    const renderer_post_depth_cull_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/post_depth_cull.comp.glsl", "quanta/src/renderer/spirv/post_depth_cull.comp.spv");
     const renderer_depth_reduce_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/depth_reduce.comp.glsl", "quanta/src/renderer/spirv/depth_reduce.comp.spv");
 
     const renderer_gui_rectangle_vert_glsl = try compileShader(builder, mode, "vert", "quanta/src/renderer_gui/rectangle.vert.glsl", "quanta/src/renderer_gui/spirv/rectangle.vert.spv");
@@ -107,7 +108,8 @@ fn preBuildQuanta(mode: std.builtin.Mode, builder: *std.build.Builder) !PreBuild
     options.step.dependOn(renderer_sky_frag_glsl.step);
     options.step.dependOn(renderer_depth_vert_glsl.step);
     options.step.dependOn(renderer_depth_frag_glsl.step);
-    options.step.dependOn(renderer_cull_comp_glsl.step);
+    options.step.dependOn(renderer_pre_depth_cull_comp_glsl.step);
+    options.step.dependOn(renderer_post_depth_cull_comp_glsl.step);
     options.step.dependOn(renderer_depth_reduce_comp_glsl.step);
     options.step.dependOn(renderer_gui_rectangle_vert_glsl.step);
     options.step.dependOn(renderer_gui_rectangle_frag_glsl.step);

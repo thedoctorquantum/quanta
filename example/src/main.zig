@@ -325,49 +325,49 @@ pub fn main() !void
         }
 
         //imgui gui
-        if (false)
+        if (true)
         {
-            try quanta.imgui.driver.begin();
-            defer quanta.imgui.driver.end();
-
-            const widgets = quanta.imgui.widgets;
-
-            imgui.igNewFrame();
-
-            imgui.igShowDemoWindow(null);
-
-            if (widgets.begin("lol"))
             {
-                widgets.textFormat("Frame time {d:.2}", .{ delta_time });
-                widgets.textFormat("hello {s}!", .{ "world" });
+                try quanta.imgui.driver.begin();
+                defer quanta.imgui.driver.end();
 
-                if (widgets.button("Lol"))
+                const widgets = quanta.imgui.widgets;
+
+                imgui.igNewFrame();
+
+                imgui.igShowDemoWindow(null);
+
+                if (widgets.begin("lol"))
                 {
-                    std.log.info("sus", .{});
+                    widgets.textFormat("Frame time {d:.2}", .{ delta_time });
+                    widgets.textFormat("hello {s}!", .{ "world" });
+
+                    if (widgets.button("Lol"))
+                    {
+                        std.log.info("sus", .{});
+                    }
+
+                    widgets.text("Renderer Statistics:");
+
+                    widgets.textFormat(
+                        "depth_pre_pass_time = {d:.2}ms", 
+                        .{ @intToFloat(f64, Renderer3D.getStatistics().depth_prepass_time) / @intToFloat(f64, std.time.ns_per_ms) }
+                    );
+
+                    widgets.textFormat(
+                        "geometry_pass_time = {d:.2}ms", 
+                        .{ @intToFloat(f64, Renderer3D.getStatistics().geometry_pass_time) / @intToFloat(f64, std.time.ns_per_ms) }
+                    );
                 }
+                widgets.end();
 
-                widgets.text("Renderer Statistics:");
-
-                widgets.textFormat(
-                    "depth_pre_pass_time = {d:.2}ms", 
-                    .{ @intToFloat(f64, Renderer3D.getStatistics().depth_prepass_time) / @intToFloat(f64, std.time.ns_per_ms) }
-                );
-
-                widgets.textFormat(
-                    "geometry_pass_time = {d:.2}ms", 
-                    .{ @intToFloat(f64, Renderer3D.getStatistics().geometry_pass_time) / @intToFloat(f64, std.time.ns_per_ms) }
-                );
+                imgui.igRender();
             }
-            widgets.end();
 
-            imgui.igRender();
-        }
-
-        //draw imgui
-        if (false)
-        {
-            RendererGui.begin(&color_image);
-            RendererGui.renderImGuiDrawData(imgui.igGetDrawData()) catch unreachable;
+            {
+                RendererGui.begin(&color_image);
+                RendererGui.renderImGuiDrawData(imgui.igGetDrawData()) catch unreachable;
+            }
         }
 
         _ = try GraphicsContext.self.vkd.queuePresentKHR(GraphicsContext.self.graphics_queue, &.{.wait_semaphore_count = 1,

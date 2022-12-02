@@ -53,11 +53,11 @@ pub fn init(
 
     //This should be close to optimal for most work loads, but not all
     //This isn't a silver bullet, just a very sensible default
-    const optimal_local_size: u32 = switch (dispatch_type)
+    var optimal_local_size: u32 = switch (dispatch_type)
     {
-        .@"1d" => Context.self.physical_device_properties.limits.max_compute_work_group_invocations,
-        .@"2d" => std.math.sqrt(Context.self.physical_device_properties.limits.max_compute_work_group_invocations),
-        .@"3d" => closestPowerOfTwo(std.math.cbrt(@intToFloat(f32, Context.self.physical_device_properties.limits.max_compute_work_group_invocations))),
+        .@"1d" => Context.self.physical_device_subgroup_properties.subgroup_size * 2,
+        .@"2d" => Context.self.physical_device_subgroup_properties.subgroup_size,
+        .@"3d" => Context.self.physical_device_subgroup_properties.subgroup_size / 4,
     };
 
     var self = ComputePipeline
@@ -424,7 +424,7 @@ pub fn setDescriptorBuffer(
         .index => .storage_buffer,
         .uniform => .uniform_buffer,
         .storage => .storage_buffer,
-        .indirect_draw => .storage_buffer,
+        .indirect => .storage_buffer,
         .staging => unreachable,
     };
 

@@ -9,7 +9,7 @@ const Buffer = @import("Buffer.zig");
 handle: vk.Image,
 @"type": Type,
 view: vk.ImageView,
-memory: vk.DeviceMemory,
+memory_page: Context.DevicePageHandle,
 size: usize,
 format: vk.Format,
 layout: vk.ImageLayout,
@@ -87,7 +87,7 @@ pub fn init(
         .handle = .null_handle,
         .@"type" = @"type",
         .view = .null_handle,
-        .memory = .null_handle,
+        .memory_page = undefined,
         .format = format,
         .layout = layout,
         .width = width,
@@ -135,14 +135,17 @@ pub fn init(
     );
     errdefer Context.self.vkd.destroyImage(Context.self.device, self.handle, &Context.self.allocation_callbacks);
 
-    const memory_requirements = Context.self.vkd.getImageMemoryRequirements(Context.self.device, self.handle);
+    var memory_requirements: vk.MemoryRequirements2 = .{ .memory_requirements = undefined };
 
-    self.size = memory_requirements.size;
+    Context.self.vkd.getImageMemoryRequirements2(Context.self.device, &vk.ImageMemoryRequirementsInfo2
+    {
+        .image = self.handle,
+    }, &memory_requirements);
 
-    self.memory = try Context.deviceAllocate(memory_requirements, .{ .device_local_bit = true });
-    errdefer Context.self.vkd.freeMemory(Context.self.device, self.memory, &Context.self.allocation_callbacks);
+    self.size = memory_requirements.memory_requirements.size;
 
-    try Context.self.vkd.bindImageMemory(Context.self.device, self.handle, self.memory, 0);
+    self.memory_page = try Context.devicePageAllocateImage(self.handle, .{ .device_local_bit = true });
+    errdefer Context.devicePageFree(self.memory_page);
     
     self.view = try Context.self.vkd.createImageView(
         Context.self.device, 
@@ -230,7 +233,7 @@ pub fn deinit(self: *Image) void
 
     defer Context.self.vkd.destroyImage(Context.self.device, self.handle, &Context.self.allocation_callbacks);
     defer Context.self.vkd.destroyImageView(Context.self.device, self.view, &Context.self.allocation_callbacks);
-    defer Context.self.vkd.freeMemory(Context.self.device, self.memory, &Context.self.allocation_callbacks);
+    defer Context.devicePageFree(self.memory_page);
 }
 
 pub const View = struct 

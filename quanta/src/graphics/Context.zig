@@ -10,6 +10,8 @@ pub const enable_khronos_validation = builtin.mode == .Debug;
 pub const enable_debug_messenger = enable_khronos_validation;
 pub const vulkan_version = std.builtin.Version { .major = 1, .minor = 3, .patch = 0, };
 
+const use_custom_allocator: bool = true;
+
 pub const BaseDispatch = vk.BaseWrapper(.{
     .createInstance = true,
     .enumerateInstanceLayerProperties = true,
@@ -20,14 +22,14 @@ pub const InstanceDispatch = vk.InstanceWrapper(.{
     .createDevice = true,
     .destroySurfaceKHR = true,
     .enumeratePhysicalDevices = true,
-    .getPhysicalDeviceProperties = true,
+    .getPhysicalDeviceProperties2 = true,
     .enumerateDeviceExtensionProperties = true,
     .getPhysicalDeviceSurfaceFormatsKHR = true,
     .getPhysicalDeviceSurfacePresentModesKHR = true,
     .getPhysicalDeviceSurfaceCapabilitiesKHR = true,
     .getPhysicalDeviceQueueFamilyProperties = true,
     .getPhysicalDeviceSurfaceSupportKHR = true,
-    .getPhysicalDeviceMemoryProperties = true,
+    .getPhysicalDeviceMemoryProperties2 = true,
     .getPhysicalDeviceFeatures2 = true,
     .getDeviceProcAddr = true,
     .getPhysicalDeviceFeatures = true,
@@ -77,7 +79,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .freeMemory = true,
     .createBuffer = true,
     .destroyBuffer = true,
-    .getBufferMemoryRequirements = true,
+    .getBufferMemoryRequirements2 = true,
     .mapMemory = true,
     .unmapMemory = true,
     .bindBufferMemory = true,
@@ -90,7 +92,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdFillBuffer = true,
     .cmdUpdateBuffer = true,
     .createImage = true,
-    .getImageMemoryRequirements = true,
+    .getImageMemoryRequirements2 = true,
     .destroyImage = true,
     .bindImageMemory = true,
     .getPipelineCacheData = true,
@@ -113,6 +115,7 @@ pub const DeviceDispatch = vk.DeviceWrapper(.{
     .cmdCopyBufferToImage2 = true,
     .createSampler = true,
     .destroySampler = true,
+    .cmdDispatchIndirect = true,
     .cmdDrawIndexedIndirect = true,
     .cmdDrawIndexedIndirectCount = true,
     .cmdSetEvent = true,
@@ -238,6 +241,7 @@ instance: vk.Instance,
 device: vk.Device,
 physical_device: vk.PhysicalDevice,
 physical_device_properties: vk.PhysicalDeviceProperties,
+physical_device_subgroup_properties: vk.PhysicalDeviceSubgroupProperties,
 physical_device_features: vk.PhysicalDeviceFeatures,
 physical_device_memory_properties: vk.PhysicalDeviceMemoryProperties,
 surface: vk.SurfaceKHR,
@@ -258,10 +262,30 @@ compute_command_pool: vk.CommandPool,
 transfer_command_pool: vk.CommandPool,
 pipeline_cache: vk.PipelineCache,
 debug_messenger: if (enable_debug_messenger) vk.DebugUtilsMessengerEXT else void,
+memories_by_type: []std.ArrayListUnmanaged(DeviceMemory),
+pages: std.ArrayListUnmanaged(DevicePageMemory),
+initial_memory_budgets: []usize, 
+required_extensions: RequiredExtensions,
+optional_extensions: OptionalExtensions,
+
+///Required *device* extensions
+pub const RequiredExtensions = struct 
+{
+    khr_swapchain: [:0]const u8 = vk.extension_info.khr_swapchain.name,
+};
+
+///Optional *device* extensions
+///If the extension is supported at runtime, it is kept as non-null, otherwise it's set to null
+pub const OptionalExtensions = struct 
+{
+    ext_memory_budget: ?[:0]const u8 = vk.extension_info.ext_memory_budget.name,
+};
 
 pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void 
 {
     self.allocator = allocator;
+    self.required_extensions = .{};
+    self.optional_extensions = .{};
 
     const vulkan_loader_path = switch (builtin.os.tag) 
     {
@@ -278,15 +302,15 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
     self.allocation_callbacks = .{
         .p_user_data = null,
-        .pfn_allocation = vulkanAllocate,
-        .pfn_reallocation = vulkanReallocate,
-        .pfn_free = vulkanFree,
+        .pfn_allocation = if (use_custom_allocator) &vulkanAllocate else null,
+        .pfn_reallocation = if (use_custom_allocator) &vulkanReallocate else null,
+        .pfn_free = if (use_custom_allocator) &vulkanFree else null,
         .pfn_internal_allocation = null,
         .pfn_internal_free = null, 
     };
 
     self.vkb = try BaseDispatch.load(getInstanceProcAddress);
-    
+
     comptime var instance_extentions: []const [*:0]const u8 = &.{};
 
     if (enable_debug_messenger)
@@ -358,18 +382,22 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         }
     }
 
+    const validation_features = [_]vk.ValidationFeatureEnableEXT
+    {
+        //I am getting really wierd segfaults at draw time using best practices layer
+        //It seems to happen whenever the shader changes between runs, which implies something to do with pipeline_cache
+        //TODO: Look into this, it's very wierd and needs time to be examined
+        // .best_practices_ext,
+        .synchronization_validation_ext,
+        .gpu_assisted_ext,
+        .gpu_assisted_reserve_binding_slot_ext
+    };
+
     self.instance = try self.vkb.createInstance(&.{
         .p_next = if (enable_khronos_validation)
             &vk.ValidationFeaturesEXT {
-                .enabled_validation_feature_count = 1,
-                .p_enabled_validation_features = &[_]vk.ValidationFeatureEnableEXT
-                {
-                    //I am getting really wierd segfaults at draw time using best practices layer
-                    //It seems to happen whenever the shader changes between runs, which implies something to do with pipeline_cache
-                    //TODO: Look into this, it's very wierd and needs time to be examined
-                    // .best_practices_ext,
-                    .synchronization_validation_ext
-                },
+                .enabled_validation_feature_count = @intCast(u32, validation_features.len),
+                .p_enabled_validation_features = &validation_features,
                 .disabled_validation_feature_count = 0,
                 .p_disabled_validation_features = undefined,
             }
@@ -422,10 +450,16 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
     _ = try glfw.createWindowSurface(self.instance, window.window, @ptrCast(?*vk.AllocationCallbacks, &self.allocation_callbacks), &self.surface);
     errdefer self.vki.destroySurfaceKHR(self.instance, self.surface, &self.allocation_callbacks);
 
-    const device_extentions = [_][*:0]const u8 
-    { 
-        vk.extension_info.khr_swapchain.name,
-    };
+    var device_extensions_buffer: [std.meta.fields(RequiredExtensions).len + std.meta.fields(OptionalExtensions).len][*:0]const u8 = undefined;
+    var device_extension_count: usize = 0;
+
+    inline for (comptime std.meta.fieldNames(RequiredExtensions)) |field_name|
+    {
+        device_extensions_buffer[device_extension_count] = @field(self.required_extensions, field_name);
+        device_extension_count += 1;
+    }
+
+    const device_extentions = device_extensions_buffer[0..device_extension_count];
 
     var device_vulkan13_features = vk.PhysicalDeviceVulkan13Features 
     {
@@ -497,22 +531,42 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
         for (physical_devices) |physical_device, i|
         {
-            const properties = self.vki.getPhysicalDeviceProperties(physical_device);
+            var properties: vk.PhysicalDeviceProperties2 = .{
+                .properties = undefined,
+            };
+
+            self.vki.getPhysicalDeviceProperties2(physical_device, &properties);
 
             log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
                 i, 
-                properties.device_name, 
-                vk.apiVersionMajor(properties.api_version), 
-                vk.apiVersionMinor(properties.api_version), 
-                vk.apiVersionPatch(properties.api_version), 
-                vk.apiVersionVariant(properties.api_version), 
+                properties.properties.device_name, 
+                vk.apiVersionMajor(properties.properties.api_version), 
+                vk.apiVersionMinor(properties.properties.api_version), 
+                vk.apiVersionPatch(properties.properties.api_version), 
+                vk.apiVersionVariant(properties.properties.api_version), 
             });
         }
 
         for (physical_devices) |physical_device, i|
         {
-            self.physical_device_properties = self.vki.getPhysicalDeviceProperties(physical_device);
+            var subgroup_properties: vk.PhysicalDeviceSubgroupProperties = .{
+                .subgroup_size = 0,
+                .supported_stages = .{},
+                .supported_operations = .{},
+                .quad_operations_in_all_stages = vk.FALSE,
+            };
+
+            var properties: vk.PhysicalDeviceProperties2 = .{
+                .p_next = &subgroup_properties,
+                .properties = undefined,
+            };
+
+            self.vki.getPhysicalDeviceProperties2(physical_device, &properties);
+            self.physical_device_properties = properties.properties; 
+            self.physical_device_subgroup_properties = subgroup_properties;
             self.physical_device_features = self.vki.getPhysicalDeviceFeatures(physical_device);
+
+            log.info("Device Subgroup size: {}", .{ subgroup_properties.subgroup_size });
 
             log.info("Device [{}] {s}: api_version: {}.{}.{}.{}", .{ 
                 i, 
@@ -578,7 +632,7 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
             _ = try self.vki.enumerateDeviceExtensionProperties(physical_device, null, &physical_device_extention_count, physical_device_extentions.ptr);
 
-            const supports_extentions = block: inline for (device_extentions) |required_extention|
+            const supports_extentions = block:  for (device_extentions) |required_extention|
             {
                 for (physical_device_extentions) |physical_device_extention|
                 {                    
@@ -596,9 +650,13 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
                 }
             } else false;
 
-            log.info("  supports_swapchain: {}", .{ supports_extentions });
+            var physical_device_memory_properties: vk.PhysicalDeviceMemoryProperties2 = .{
+                .memory_properties = undefined,
+            };
 
-            self.physical_device_memory_properties = self.vki.getPhysicalDeviceMemoryProperties(physical_device);
+            self.vki.getPhysicalDeviceMemoryProperties2(physical_device, &physical_device_memory_properties);
+
+            self.physical_device_memory_properties = physical_device_memory_properties.memory_properties;
             self.surface_capabilities = try self.vki.getPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, self.surface);
 
             var surface_format_count: u32 = 0;
@@ -699,14 +757,50 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
 
         self.vki.getPhysicalDeviceFeatures2(self.physical_device, &physical_device_features);
 
+        var physical_device_extention_count: u32 = 0;
+
+        _ = try self.vki.enumerateDeviceExtensionProperties(self.physical_device, null, &physical_device_extention_count, null);
+
+        const physical_device_extentions = try self.allocator.alloc(vk.ExtensionProperties, physical_device_extention_count);
+        defer self.allocator.free(physical_device_extentions);
+
+        _ = try self.vki.enumerateDeviceExtensionProperties(self.physical_device, null, &physical_device_extention_count, physical_device_extentions.ptr);
+
+        inline for (comptime std.meta.fieldNames(OptionalExtensions)) |field_name|
+        {
+            const extention_name = &@field(self.optional_extensions, field_name);
+            const sentinel_index = std.mem.indexOfSentinel(u8, 0, extention_name.*.?);
+
+            const supports_extention = block: for (physical_device_extentions) |physical_device_extention|
+            {                    
+                if (std.mem.eql(u8, physical_device_extention.extension_name[0..sentinel_index], extention_name.*.?[0..sentinel_index]))
+                {
+                    break: block true;
+                }
+            } else
+            {
+                log.info("Device {s} doesn't support optional extention {s}", .{ self.physical_device_properties.device_name, extention_name.*.? });
+
+                extention_name.* = null;
+
+                break: block false;
+            };
+
+            if (supports_extention)
+            {
+                device_extensions_buffer[device_extension_count] = @field(self.optional_extensions, field_name).?;
+                device_extension_count += 1;
+            }
+        }
+
         const device_create_info = vk.DeviceCreateInfo {
             .p_next = &physical_device_features,
             .flags = .{},
             .p_queue_create_infos = &queue_create_infos,
             .queue_create_info_count = @intCast(u32, queue_create_infos.len),
             .p_enabled_features = null,
-            .enabled_extension_count = device_extentions.len,
-            .pp_enabled_extension_names = &device_extentions,
+            .enabled_extension_count = @intCast(u32, device_extension_count),
+            .pp_enabled_extension_names = device_extentions.ptr,
             .enabled_layer_count = 0,
             .pp_enabled_layer_names = undefined,
         };
@@ -768,6 +862,25 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         );
     }
     errdefer self.vkd.destroyPipelineCache(self.device, self.pipeline_cache, &self.allocation_callbacks);
+
+    self.memories_by_type = try self.allocator.alloc(std.ArrayListUnmanaged(DeviceMemory), self.physical_device_memory_properties.memory_heap_count);
+    errdefer self.allocator.free(self.memories_by_type);
+
+    for (self.memories_by_type) |*memories|
+    {
+        memories.* = .{};
+    }
+
+    self.pages = .{};
+    self.initial_memory_budgets = try self.allocator.alloc(usize, self.physical_device_memory_properties.memory_heap_count);
+    errdefer self.allocator.free(self.initial_memory_budgets);
+
+    for (self.initial_memory_budgets) |*budget, i|
+    {
+        budget.* = getMemoryHeapBudget(@intCast(u32, i));
+
+        std.log.info("Budget[{}] = {}", .{ i, budget.* });
+    }
 }
 
 pub fn deinit() void 
@@ -788,6 +901,18 @@ pub fn deinit() void
     defer if (self.compute_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.compute_command_pool, &self.allocation_callbacks);
     defer if (self.transfer_command_pool != .null_handle) self.vkd.destroyCommandPool(self.device, self.transfer_command_pool, &self.allocation_callbacks);
     defer self.vkd.destroyPipelineCache(self.device, self.pipeline_cache, &self.allocation_callbacks);
+    defer self.allocator.free(self.memories_by_type);
+    defer for (self.memories_by_type) |*memories|
+    {
+        for (memories.items) |*memory|
+        {
+            deviceFree(memory.handle);
+        }
+
+        memories.deinit(self.allocator);
+    };
+    defer self.pages.deinit(self.allocator);
+    defer self.allocator.free(self.initial_memory_budgets);
 }
 
 pub fn imageMemoryBarrier(
@@ -833,7 +958,13 @@ pub fn imageMemoryBarrier(
     );
 }
 
-pub fn getMemoryTypeIndex(requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !u32
+pub const MemoryType = struct 
+{
+    index: u32,
+    heap_index: u32,
+};
+
+pub fn getMemoryType(requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !MemoryType
 {
     var memory_type_index: u32 = 0; 
     
@@ -843,10 +974,10 @@ pub fn getMemoryTypeIndex(requirements: vk.MemoryRequirements, properties: vk.Me
         const has_properties = memory_type.property_flags.contains(properties);
 
         if (has_properties and 
-            ((@as(u32, 1) << @intCast(u5, @bitCast(u32, memory_type_index))) & @bitCast(u32, requirements.memory_type_bits)) != 0
+            ((@as(u32, 1) << @intCast(u5, memory_type_index)) & requirements.memory_type_bits) != 0
         )
         {
-            return memory_type_index;
+            return .{ .index = memory_type_index, .heap_index = memory_type.heap_index };
         }
     }
 
@@ -882,12 +1013,51 @@ pub fn getMemoryTypeIndexHostPointer(host_pointer: [*]const u8, properties: vk.M
     return error.MemoryTypeNotFound;    
 }
 
-pub fn deviceAllocate(requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !vk.DeviceMemory
+pub fn deviceAllocateWithMemoryType(size: usize, memory_type: MemoryType, dedicated_info: ?vk.MemoryDedicatedAllocateInfo) !vk.DeviceMemory
 {
+    var device_memory_budget_properties: vk.PhysicalDeviceMemoryBudgetPropertiesEXT = .{
+        .heap_budget = undefined,
+        .heap_usage = undefined,
+    };
+
+    var device_memory_properties: vk.PhysicalDeviceMemoryProperties2 = .{
+        .p_next = if (self.optional_extensions.ext_memory_budget != null) &device_memory_budget_properties else null,
+        .memory_properties = undefined,
+    };
+
+    self.vki.getPhysicalDeviceMemoryProperties2(self.physical_device, &device_memory_properties);
+
+    if (self.optional_extensions.ext_memory_budget != null)
+    {
+        const heap_usage = device_memory_budget_properties.heap_usage[memory_type.heap_index];
+        const heap_budget = device_memory_budget_properties.heap_budget[memory_type.heap_index];
+
+        if (heap_usage + size >= heap_budget)
+        {
+            return error.OutOfMemory;
+        }
+
+        log.info("gpu heap usage {}mb; budget {}mb", .{
+            heap_usage / (1024 * 1024),
+            heap_budget / (1024 * 1024),
+        });
+    }
+
     return try self.vkd.allocateMemory(self.device, &.{
-        .allocation_size = requirements.size,
-        .memory_type_index = try getMemoryTypeIndex(requirements, properties),
+        .p_next = if (dedicated_info != null) &dedicated_info.? else null,
+        .allocation_size = size,
+        .memory_type_index = memory_type.index,
     }, &self.allocation_callbacks);    
+}
+
+pub fn deviceAllocate(requirements: vk.MemoryRequirements, properties: vk.MemoryPropertyFlags) !vk.DeviceMemory
+{    
+    return try deviceAllocateWithMemoryType(requirements.size, try getMemoryType(requirements, properties));
+}
+
+pub fn deviceFree(memory: vk.DeviceMemory) void 
+{
+    self.vkd.freeMemory(self.device, memory, &self.allocation_callbacks);
 }
 
 pub fn deviceAllocateHostMemory(
@@ -907,6 +1077,283 @@ pub fn deviceAllocateHostMemory(
         .memory_type_index = try getMemoryTypeIndexHostPointer(host_memory.ptr, properties),
     }, &self.allocation_callbacks);    
 }
+
+pub const DeviceMemory = struct 
+{
+    handle: vk.DeviceMemory,
+    next_offset: usize,
+    size: vk.DeviceSize,  
+    mapped_address: ?[*]u8,
+    ///Reference count for mapping memory
+    map_count: u32,
+};
+
+pub const DevicePageMemory = struct 
+{
+    memory_index: u32,
+    heap_index: u32,
+    offset: vk.DeviceSize,
+    size: vk.DeviceSize,
+};
+
+pub fn getMemoryHeapBudget(heap_index: u32) usize
+{
+    if (self.optional_extensions.ext_memory_budget == null)
+    {
+        unreachable;
+    }
+
+    var device_memory_budget_properties: vk.PhysicalDeviceMemoryBudgetPropertiesEXT = .{
+        .heap_budget = undefined,
+        .heap_usage = undefined,
+    };
+
+    var device_memory_properties: vk.PhysicalDeviceMemoryProperties2 = .{
+        .p_next = if (self.optional_extensions.ext_memory_budget != null) &device_memory_budget_properties else null,
+        .memory_properties = undefined,
+    };
+
+    self.vki.getPhysicalDeviceMemoryProperties2(self.physical_device, &device_memory_properties);
+
+    return device_memory_budget_properties.heap_budget[heap_index] - device_memory_budget_properties.heap_usage[heap_index];
+}
+
+pub const DevicePageHandle = enum(u32) { _ };
+
+pub fn devicePageAllocate(
+    size: usize, 
+    alignment: usize, 
+    memory_type_bits: u32, 
+    properties: vk.MemoryPropertyFlags,
+    dedicated_info: ?vk.MemoryDedicatedAllocateInfo,
+) !DevicePageHandle
+{
+    const handle = @intToEnum(DevicePageHandle, @intCast(u32, self.pages.items.len));
+
+    const requirements = vk.MemoryRequirements { .size = size, .alignment = alignment, .memory_type_bits = memory_type_bits };
+    const memory_type = try getMemoryType(requirements, properties);
+
+    const memories = &self.memories_by_type[memory_type.heap_index];
+
+    var page_memory_index: ?u32 = null;
+    var page_memory_offset: usize = 0;
+
+    for (memories.items) |*memory, i|
+    {
+        const next_offset = std.mem.alignForward(memory.next_offset, alignment);
+
+        const new_next_offset = next_offset + size; 
+        const suitable = new_next_offset <= memory.size;
+
+        if (!suitable)
+        {
+            continue;
+        }
+
+        log.info("SUITABLE = {}", .{ suitable });
+
+        page_memory_index = @intCast(u32, i);
+        page_memory_offset = next_offset;
+
+        memory.next_offset = new_next_offset;
+
+        break;
+    }
+
+    //If there is no suitable memory, allocate a new one
+    if (page_memory_index == null)
+    {
+        log.info("NEW ALLOC", .{});
+
+        // const budget = self.initial_memory_budgets[memory_type.heap_index];
+        // const budget = getMemoryHeapBudget(memory_type.heap_index);
+
+        // const minimum_memory_size = budget / 8;
+
+        // const initial_memory_size = if (memory_type.heap_index == 0 and dedicated_info == null) @max(minimum_memory_size, (alignment + size)) else size;
+        const initial_memory_size = size;
+
+        page_memory_index = @intCast(u32, memories.items.len);
+
+        const page_memory = try deviceAllocateWithMemoryType(initial_memory_size, memory_type, dedicated_info);
+        errdefer deviceFree(page_memory);
+
+        try memories.append(self.allocator, .{
+            .handle = page_memory,
+            .next_offset = alignment + size,
+            .size = initial_memory_size,
+            .map_count = 0,
+            .mapped_address = null,
+        });
+    }
+
+    try self.pages.append(self.allocator, .{
+        .memory_index = page_memory_index.?,
+        .heap_index = memory_type.heap_index,
+        .offset = page_memory_offset,
+        .size = size,
+    });
+
+    return handle;
+}
+
+pub fn devicePageFree(page: DevicePageHandle) void 
+{
+    const memory = devicePageGetMemory(page);
+    const memory_handle = &self.memories_by_type[memory.heap_index].items[memory.memory_index];
+
+    if (memory_handle.next_offset - memory.size == memory.offset)
+    {
+        memory_handle.next_offset -= memory.size;
+    }
+
+    if (memory_handle.next_offset == 0)
+    {
+        deviceFree(memory_handle.handle);
+
+        memory_handle.handle = .null_handle;
+        memory_handle.size = 0;
+    }
+} 
+
+pub fn devicePageGetMemory(page: DevicePageHandle) DevicePageMemory
+{
+    return self.pages.items[@enumToInt(page)];
+} 
+
+pub fn devicePageMap(page: DevicePageHandle, comptime T: type, length: usize) ![]T
+{
+    const page_memory = devicePageGetMemory(page);
+    const memory = &self.memories_by_type[page_memory.heap_index].items[page_memory.memory_index];
+
+    var data = @ptrCast(?[*]T, @alignCast(@alignOf(T), memory.mapped_address));
+
+    if (memory.map_count == 0)
+    {
+        data = @ptrCast(?[*]T, @alignCast(@alignOf(T), try Context.self.vkd.mapMemory(
+            Context.self.device, 
+            memory.handle, 
+            0, 
+            memory.size, 
+            .{}
+        )));
+
+        memory.mapped_address = @ptrCast([*]u8, data);
+    }
+
+    data.? = data.? + page_memory.offset;
+
+    memory.map_count += 1;
+
+    return data.?[0..length];
+}
+
+pub fn devicePageUnmap(page: DevicePageHandle) void 
+{
+    const page_memory = devicePageGetMemory(page);
+    const memory = &self.memories_by_type[page_memory.heap_index].items[page_memory.memory_index];
+
+    memory.map_count -= 1;
+
+    if (memory.map_count == 0)
+    {
+        Context.self.vkd.unmapMemory(self.device, memory.handle);
+    }
+}
+
+pub fn devicePageBindToBuffer(buffer: vk.Buffer, page: DevicePageHandle, offset: usize) !void 
+{   
+    const memory = devicePageGetMemory(page);
+    const memory_handle = self.memories_by_type[memory.heap_index].items[memory.memory_index];
+
+    try self.vkd.bindBufferMemory(self.device, buffer, memory_handle.handle, memory.offset + offset);
+}
+
+pub fn devicePageBindToImage(image: vk.Image, page: DevicePageHandle, offset: usize) !void 
+{   
+    const memory = devicePageGetMemory(page);
+    const memory_handle = self.memories_by_type[memory.heap_index].items[memory.memory_index];
+
+    try self.vkd.bindImageMemory(self.device, image, memory_handle.handle, memory.offset + offset);
+}
+
+///Allocates a page dedicated to the specified buffer resource
+pub fn devicePageAllocateBuffer(buffer: vk.Buffer, properties: vk.MemoryPropertyFlags) !DevicePageHandle
+{
+    var dedicated_requirements: vk.MemoryDedicatedRequirements = .{
+        .prefers_dedicated_allocation = vk.FALSE,
+        .requires_dedicated_allocation = vk.FALSE,
+    };
+
+    var memory_requirements: vk.MemoryRequirements2 = .{
+        .p_next = &dedicated_requirements,
+        .memory_requirements = undefined,
+    };
+
+    Context.self.vkd.getBufferMemoryRequirements2(Context.self.device, &vk.BufferMemoryRequirementsInfo2
+    {
+        .buffer = buffer,
+    }, &memory_requirements);
+
+    const page = try Context.devicePageAllocate(
+        memory_requirements.memory_requirements.size, 
+        memory_requirements.memory_requirements.alignment, 
+        memory_requirements.memory_requirements.memory_type_bits, 
+        properties, 
+        if (
+            dedicated_requirements.prefers_dedicated_allocation == vk.TRUE or
+            dedicated_requirements.requires_dedicated_allocation == vk.TRUE
+            )
+        .{
+            .image = .null_handle,
+            .buffer = buffer,
+        } else null
+    );
+    errdefer Context.devicePageFree(page);
+
+    try devicePageBindToBuffer(buffer, page, 0);
+
+    return page;
+} 
+
+///Allocates a page dedicated to the specified image resource
+pub fn devicePageAllocateImage(image: vk.Image, properties: vk.MemoryPropertyFlags) !DevicePageHandle
+{
+    var dedicated_requirements: vk.MemoryDedicatedRequirements = .{
+        .prefers_dedicated_allocation = vk.FALSE,
+        .requires_dedicated_allocation = vk.FALSE,
+    };
+
+    var memory_requirements: vk.MemoryRequirements2 = .{
+        .p_next = &dedicated_requirements,
+        .memory_requirements = undefined,
+    };
+
+    Context.self.vkd.getImageMemoryRequirements2(Context.self.device, &vk.ImageMemoryRequirementsInfo2
+    {
+        .image = image,
+    }, &memory_requirements);
+
+    const page = try Context.devicePageAllocate(
+        memory_requirements.memory_requirements.size, 
+        memory_requirements.memory_requirements.alignment, 
+        memory_requirements.memory_requirements.memory_type_bits, 
+        properties, 
+        if (
+            dedicated_requirements.prefers_dedicated_allocation == vk.TRUE or
+            dedicated_requirements.requires_dedicated_allocation == vk.TRUE
+            )
+        .{
+            .image = image,
+            .buffer = .null_handle,
+        } else null
+    );
+    errdefer Context.devicePageFree(page);
+
+    try devicePageBindToImage(image, page, 0);
+
+    return page;
+} 
 
 pub fn getPipelineCacheData() ![]const u8 
 {

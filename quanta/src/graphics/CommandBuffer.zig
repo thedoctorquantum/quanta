@@ -124,6 +124,7 @@ pub const PipelineStage = packed struct
     early_fragment_tests: bool = false,
     late_fragment_tests: bool = false,
     draw_indirect: bool = false,
+    index_input: bool = false,
     vertex_shader: bool = false,
     fragment_shader: bool = false,
     compute_shader: bool = false,
@@ -140,6 +141,7 @@ inline fn getVkPipelineStage(pipeline_stage: PipelineStage) vk.PipelineStageFlag
         .late_fragment_tests_bit = pipeline_stage.late_fragment_tests,
         .draw_indirect_bit = pipeline_stage.draw_indirect,
         .vertex_shader_bit = pipeline_stage.vertex_shader,
+        .index_input_bit = pipeline_stage.index_input,
         .fragment_shader_bit = pipeline_stage.fragment_shader,
         .compute_shader_bit = pipeline_stage.compute_shader,
         .copy_bit = pipeline_stage.copy,
@@ -159,13 +161,13 @@ pub const ResourceAccess = packed struct
     indirect_command_read: bool = false,
     transfer_read: bool = false,
     transfer_write: bool = false,
+    index_read: bool = false,
 };
 
 inline fn getVkResourceAccess(resource_access: ResourceAccess) vk.AccessFlags2
 {
     return vk.AccessFlags2 
     {
-        .index_read_bit = false,
         .vertex_attribute_read_bit = false,
         .uniform_read_bit = false,
         .input_attachment_read_bit = false,
@@ -181,6 +183,7 @@ inline fn getVkResourceAccess(resource_access: ResourceAccess) vk.AccessFlags2
         .host_write_bit = false,
         .memory_read_bit = false,
         .memory_write_bit = false,
+        .index_read_bit = resource_access.index_read,
         .shader_storage_read_bit = resource_access.shader_storage_read,
         .shader_storage_write_bit = resource_access.shader_storage_write,
         .indirect_command_read_bit = resource_access.indirect_command_read,
@@ -350,6 +353,7 @@ pub const Attachment = struct
 {
     image: *const Image,
     clear: ?Clear = null,
+    store: bool = true,
 
     pub const Clear = union(enum)
     {
@@ -379,7 +383,7 @@ pub fn beginRenderPass(
             .resolve_image_view = .null_handle,
             .resolve_image_layout = .@"undefined",
             .load_op = if (color_attachment.clear != null) .clear else .load,
-            .store_op = .store,
+            .store_op = if (color_attachment.store) .store else .dont_care,
             .clear_value = if (color_attachment.clear != null) switch (color_attachment.clear.?)
             {
                 .color => .{ .color = .{ .float_32 = color_attachment.clear.?.color } },
@@ -399,7 +403,7 @@ pub fn beginRenderPass(
             .resolve_image_view = .null_handle,
             .resolve_image_layout = .@"undefined",
             .load_op = if (depth_attachment.?.clear != null) .clear else .load,
-            .store_op = .store, //May want to set this to dont_care to let the driver optimise 
+            .store_op = if (depth_attachment.?.store) .store else .dont_care,
             .clear_value = if (depth_attachment.?.clear != null) switch (depth_attachment.?.clear.?)
             {
                 .color => .{ .color = .{ .float_32 = depth_attachment.?.clear.?.color } },
@@ -506,13 +510,21 @@ pub fn setIndexBuffer(self: CommandBuffer, buffer: Buffer, index_type: IndexType
     });
 }
 
-pub fn copyBuffer(self: CommandBuffer, source: Buffer, source_offset: usize, destination: Buffer, destination_offset: usize) void 
+pub fn copyBuffer(
+    self: CommandBuffer, 
+    source: Buffer, 
+    source_offset: usize, 
+    source_size: usize, 
+    destination: Buffer, 
+    destination_offset: usize,
+    destination_size: usize, 
+    ) void 
 {
     const copy_region = vk.BufferCopy 
     {
         .src_offset = source_offset,
         .dst_offset = destination_offset,
-        .size = @min(source.size, destination.size),
+        .size = @min(source_size, destination_size),
     };
 
     Context.self.vkd.cmdCopyBuffer(self.handle, source.handle, destination.handle, 1, @ptrCast([*]const vk.BufferCopy, &copy_region));
@@ -692,4 +704,16 @@ pub fn computeDispatch(self: CommandBuffer, thread_count_x: u32, thread_count_y:
     const group_count_z = (thread_count_z + self.local_size_z - 1) / self.local_size_z; 
 
     Context.self.vkd.cmdDispatch(self.handle, group_count_x, group_count_y, group_count_z);
+}
+
+pub const DispatchIndirectCommand = extern struct 
+{
+    group_count_x: u32,
+    group_count_y: u32,
+    group_count_z: u32,
+};
+
+pub fn computeDispatchIndirect(self: CommandBuffer, buffer: Buffer, offset: usize) void 
+{
+    Context.self.vkd.cmdDispatchIndirect(self.handle, buffer.handle, offset);
 }

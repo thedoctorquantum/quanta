@@ -39,7 +39,9 @@ rectangles: std.ArrayListUnmanaged(Rectangle) = .{},
 scissors: std.ArrayListUnmanaged([4]u16) = .{},
 rectangles_buffer: graphics.Buffer = undefined,
 vertices_buffer: graphics.Buffer = undefined,
+vertices_staging_buffer: graphics.Buffer = undefined,
 indices_buffer: graphics.Buffer = undefined,
+indices_staging_buffer: graphics.Buffer = undefined,
 textures: std.ArrayListUnmanaged(Texture) = .{},
 
 nk_commands: nk.nk_buffer = undefined,
@@ -138,10 +140,16 @@ pub fn init(allocator: std.mem.Allocator, swapchain: graphics.Swapchain) !void
     self.vertices_buffer = try graphics.Buffer.init(max_vertices * @sizeOf(Vertex), .storage);
     errdefer self.vertices_buffer.deinit();
 
+    self.vertices_staging_buffer = try graphics.Buffer.init(max_vertices * @sizeOf(Vertex), .staging);
+    errdefer self.vertices_staging_buffer.deinit();
+
     self.mesh_pipeline.setDescriptorBuffer(0, 0, self.vertices_buffer);
 
     self.indices_buffer = try graphics.Buffer.init(max_indices * @sizeOf(u16), .index);
     errdefer self.indices_buffer.deinit();
+
+    self.indices_staging_buffer = try graphics.Buffer.init(max_indices * @sizeOf(u16), .staging);
+    errdefer self.indices_staging_buffer.deinit();
 
     nk.nk_buffer_init(&self.nk_commands, &nk_allocator, 4096 * 10);
     std.debug.assert(self.nk_commands.memory.ptr != null);
@@ -188,7 +196,9 @@ pub fn deinit() void
     defer self.rectangles_buffer.deinit();
     defer self.rectangles.deinit(self.allocator);
     defer self.vertices_buffer.deinit();
+    defer self.vertices_staging_buffer.deinit();
     defer self.indices_buffer.deinit();
+    defer self.indices_staging_buffer.deinit();
     defer self.scissors.deinit(self.allocator);
     defer self.textures.deinit(self.allocator);
     defer for (self.textures.items) |*texture|
@@ -403,9 +413,86 @@ pub fn drawRectangle(rectangle: Rectangle) void
 
 pub fn renderImGuiDrawData(draw_data: *const imgui.ImDrawData) !void 
 {
+    if (draw_data.CmdListsCount == 0 or !draw_data.Valid) return;
+
     {
         try self.command_buffer.begin();
         defer self.command_buffer.end();
+
+        //Upload
+        {
+
+            {
+                std.debug.assert(draw_data.CmdListsCount != 0);
+
+                var command_list_index: usize = 0;
+
+                var vertex_offset: usize = 0;
+                var index_offset: usize = 0;
+                
+                const staging_vertices = try self.vertices_staging_buffer.map(imgui.ImDrawVert);
+                const staging_indices = try self.indices_staging_buffer.map(u16);
+
+                while (command_list_index < @intCast(usize, draw_data.CmdListsCount)) : (command_list_index += 1)
+                {
+                    const command_list: *imgui.ImDrawList = draw_data.CmdLists[command_list_index];
+                    
+                    const vertices: []imgui.ImDrawVert = command_list.VtxBuffer.Data[0..@intCast(usize, command_list.VtxBuffer.Size)];
+                    const indices: []u16 = command_list.IdxBuffer.Data[0..@intCast(usize, command_list.IdxBuffer.Size)];
+
+                    @memcpy(
+                        @ptrCast([*]u8, staging_vertices.ptr + vertex_offset), 
+                        @ptrCast([*]u8, vertices.ptr), 
+                        vertices.len * @sizeOf(imgui.ImDrawVert)
+                    );
+
+                    @memcpy(
+                        @ptrCast([*]u8, staging_indices.ptr + index_offset), 
+                        @ptrCast([*]u8, indices.ptr), 
+                        indices.len * @sizeOf(u16)
+                    );
+
+                    //Would use this code, but not sure if it generates a good memcpy
+                    // std.mem.copy(imgui.ImDrawVert, staging_vertices[vertex_offset..vertex_offset + vertices.len], vertices);
+                    // std.mem.copy(u16, staging_indices[index_offset..index_offset + indices.len], indices);
+
+                    vertex_offset += vertices.len;
+                    index_offset += indices.len;
+                } 
+
+                self.command_buffer.copyBuffer(
+                    self.vertices_staging_buffer, 
+                    0, 
+                    vertex_offset * @sizeOf(imgui.ImDrawVert),
+                    self.vertices_buffer, 
+                    0,
+                    vertex_offset  * @sizeOf(imgui.ImDrawVert),
+                );
+
+                self.command_buffer.copyBuffer(
+                    self.indices_staging_buffer, 
+                    0, 
+                    index_offset * @sizeOf(u16), 
+                    self.indices_buffer, 
+                    0,
+                    index_offset * @sizeOf(u16), 
+                );
+
+                self.command_buffer.bufferBarrier(self.vertices_buffer, .{
+                    .source_stage = .{ .copy = true, },
+                    .source_access = .{ .transfer_write = true },
+                    .destination_stage = .{ .vertex_shader = true, },
+                    .destination_access = .{ .shader_read = true },
+                });
+
+                self.command_buffer.bufferBarrier(self.indices_buffer, .{
+                    .source_stage = .{ .copy = true },
+                    .source_access = .{ .transfer_write = true },
+                    .destination_stage = .{ .index_input = true },
+                    .destination_access = .{ .index_read = true },
+                });
+            }
+        }
 
         //#Color Pass 1: main 
         {
@@ -460,10 +547,7 @@ pub fn renderImGuiDrawData(draw_data: *const imgui.ImDrawData) !void
                     
                     const vertices: []imgui.ImDrawVert = command_list.VtxBuffer.Data[0..@intCast(usize, command_list.VtxBuffer.Size)];
                     const indices: []u16 = command_list.IdxBuffer.Data[0..@intCast(usize, command_list.IdxBuffer.Size)];
-
-                    try self.vertices_buffer.update(imgui.ImDrawVert, vertex_offset * @sizeOf(imgui.ImDrawVert), vertices);
-                    try self.indices_buffer.update(u16, index_offset * @sizeOf(u16), indices);
-
+                    
                     var command_index: usize = 0;
                     
                     while (command_index < @intCast(usize, command_list.CmdBuffer.Size)) : (command_index += 1)
