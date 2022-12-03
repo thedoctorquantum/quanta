@@ -389,8 +389,8 @@ pub fn init(allocator: std.mem.Allocator, pipeline_cache_data: []const u8) !void
         //TODO: Look into this, it's very wierd and needs time to be examined
         // .best_practices_ext,
         .synchronization_validation_ext,
-        .gpu_assisted_ext,
-        .gpu_assisted_reserve_binding_slot_ext
+        // .gpu_assisted_ext,
+        // .gpu_assisted_reserve_binding_slot_ext
     };
 
     self.instance = try self.vkb.createInstance(&.{

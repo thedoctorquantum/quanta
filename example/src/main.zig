@@ -193,14 +193,15 @@ pub fn main() !void
     const scene = try Renderer3D.createScene(
         1, 
         50_000, 
+        4096,
         environment_map_data, 
-        1024, 1024
+        1024, 1024,
     );
     defer Renderer3D.destroyScene(scene);
 
     for (test_scene_import.sub_meshes) |sub_mesh, i|
     {
-        try Renderer3D.sceneAddStaticMesh(
+        try Renderer3D.sceneAddMesh(
             scene, 
             test_scene_meshes[i], 
             test_scene_materials[sub_mesh.material_index], 
@@ -322,6 +323,17 @@ pub fn main() !void
         {
             try Renderer3D.beginSceneRender(scene, &.{ Renderer3D.View { .camera = camera } });
             defer Renderer3D.endSceneRender(scene);
+
+            //immediate mode drawing
+            Renderer3D.scenePushMesh(scene, test_scene_meshes[0], test_scene_materials[1], zalgebra.Mat4.identity());
+            Renderer3D.scenePushMesh(scene, test_scene_meshes[3], test_scene_materials[1], zalgebra.Mat4.identity());      
+
+            Renderer3D.scenePushPointLight(scene, .{
+                .position = .{ 0, 1, 0 },
+                .intensity = 10,
+                .ambient = packUnorm4x8(.{ 0.01, 0.01, 0.01, 1 }),
+                .diffuse = packUnorm4x8(.{ 0.8, 0.4, 0.1, 1 }),
+            });
         }
 
         //imgui gui
@@ -425,4 +437,27 @@ pub fn log(
     std.debug.getStderrMutex().lock();
     defer std.debug.getStderrMutex().unlock();
     nosuspend stderr.print(level_txt ++ prefix2 ++ format ++ "\n", args) catch return;
+}
+
+fn packUnorm4x8(v: [4]f32) u32
+{
+    const Unorm4x8 = packed struct(u32)
+    {
+        x: u8,
+        y: u8,
+        z: u8,
+        w: u8,
+    };
+
+    const x = @floatToInt(u8, v[0] * @intToFloat(f32, std.math.maxInt(u8)));
+    const y = @floatToInt(u8, v[1] * @intToFloat(f32, std.math.maxInt(u8)));
+    const z = @floatToInt(u8, v[2] * @intToFloat(f32, std.math.maxInt(u8)));
+    const w = @floatToInt(u8, v[3] * @intToFloat(f32, std.math.maxInt(u8)));
+
+    return @bitCast(u32, Unorm4x8 {
+        .x = x,
+        .y = y,
+        .z = z, 
+        .w = w,
+    });
 }

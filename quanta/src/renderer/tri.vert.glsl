@@ -4,9 +4,11 @@
 
 #define u32 uint
 
-layout(push_constant) uniform Constants
+layout(push_constant, scalar) uniform Constants
 {
     mat4 view_projection;
+    u32 point_light_count;
+    vec3 view_position;
 } constants;
 
 struct Vertex 
@@ -55,6 +57,8 @@ out Out
 {
     flat uint material_index;
     flat uint primitive_index;
+    vec3 position;
+    vec3 normal;
     vec4 color;
     vec2 uv;
 } out_data;
@@ -66,7 +70,11 @@ void main()
     Vertex vertex = vertices[gl_VertexIndex]; 
     mat4 transform = mat4(transforms[instance_index]);
 
+    vec4 translation = transform * vec4(vertex_positions[gl_VertexIndex], 1.0);
+
+    out_data.position = vec3(translation);
     out_data.color = unpackUnorm4x8(vertex.color);
+    out_data.normal = vertex.normal;
     out_data.uv = vertex.uv;
     out_data.material_index = material_indices[instance_index]; 
     out_data.primitive_index = gl_VertexIndex / 3; 
