@@ -338,6 +338,7 @@ pub fn convertToGltfImport(allocator: std.mem.Allocator, import_result: ImportRe
         .sub_meshes = &.{},
         .materials = &.{},
         .textures = &.{},
+        .point_lights = &.{},
     };
 
     gltf_import_data.vertex_positions = try allocator.alloc([3]f32, import_result.vertices.len);

@@ -513,9 +513,9 @@ pub fn renderImGuiDrawData(draw_data: *const imgui.ImDrawData) !void
 
             self.command_buffer.setGraphicsPipeline(self.mesh_pipeline);
             self.command_buffer.setViewport(
-                0, 0, 
+                0, @intToFloat(f32, window.getHeight()), 
                 @intToFloat(f32, window.getWidth()), 
-                @intToFloat(f32, window.getHeight()), 
+                -@intToFloat(f32, window.getHeight()), 
                 0, 
                 1
             );

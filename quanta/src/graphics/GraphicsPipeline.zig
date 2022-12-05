@@ -47,7 +47,7 @@ pub const Options = struct
     {
         polygon_mode: PolygonMode = .fill,
         cull_mode: CullMode = .none,
-        vertex_winding: VertexWinding = .clockwise,
+        vertex_winding: VertexWinding = .counter_clockwise,
 
         pub const PolygonMode = enum 
         {

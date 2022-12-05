@@ -36,5 +36,4 @@ void main()
     out_data.color.b = pow(out_data.color.b, 2.2);
 
     gl_Position = push_constants.projection * vec4(vertex.position, 0, 1);
-    gl_Position.y = -gl_Position.y;
 }

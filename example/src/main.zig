@@ -60,6 +60,8 @@ const example_assets = struct
     const gm_construct = @intToEnum(asset.Archive.AssetDescriptor, 1);
     const gm_castle_island = @intToEnum(asset.Archive.AssetDescriptor, 2);
     const environment_map = @intToEnum(asset.Archive.AssetDescriptor, 3);
+    const test_scene = @intToEnum(asset.Archive.AssetDescriptor, 4);
+    const lights_test = @intToEnum(asset.Archive.AssetDescriptor, 5);
 };
 
 pub fn main() !void 
@@ -141,7 +143,7 @@ pub fn main() !void
 
     std.log.info("asset_archive.assets.len = {any}", .{ asset_archive.assets.len });
     
-    const test_scene_blob = asset_archive.getAssetData(example_assets.sponza);
+    const test_scene_blob = asset_archive.getAssetData(@intToEnum(asset.Archive.AssetDescriptor, 3));
 
     const test_scene_import = try gltf.decode(allocator, test_scene_blob);
     defer gltf.decodeFree(test_scene_import, allocator);
@@ -149,8 +151,8 @@ pub fn main() !void
     const test_scene_meshes = try allocator.alloc(Renderer3D.MeshHandle, test_scene_import.sub_meshes.len);
     defer allocator.free(test_scene_meshes);
 
-    const test_scene_materials_by_texture = try allocator.alloc(Renderer3D.MaterialHandle, test_scene_import.textures.len);
-    defer allocator.free(test_scene_materials_by_texture);
+    const test_scene_textures = try allocator.alloc(Renderer3D.TextureHandle, test_scene_import.textures.len);
+    defer allocator.free(test_scene_textures);
 
     const test_scene_materials = try allocator.alloc(Renderer3D.MaterialHandle, test_scene_import.materials.len);
     defer allocator.free(test_scene_materials);
@@ -168,27 +170,28 @@ pub fn main() !void
 
     for (test_scene_import.textures) |texture, i|
     {
-        test_scene_materials_by_texture[i] = try Renderer3D.createMaterial(
+        test_scene_textures[i] = try Renderer3D.createTexture(
             texture.data,
             texture.width, 
             texture.height, 
-            .{ 1, 1, 1, 1 },
         );
     }
 
-    if (test_scene_materials_by_texture.len != 0)
+    if (test_scene_import.materials.len != 0)
     {
         for (test_scene_import.materials) |material, i|
         {
-            test_scene_materials[i] = test_scene_materials_by_texture[material.albedo_texture_index];
+            std.log.info("material albedo index {}", .{ material.albedo_texture_index });
+            std.log.info("material albedo {any}", .{ material.albedo });
+
+            test_scene_materials[i] = try Renderer3D.createMaterial(
+                if (material.albedo_texture_index != 0) test_scene_textures[material.albedo_texture_index - 1] else null,
+                material.albedo,
+            );
         }
     }
-    else 
-    {
-        test_scene_materials[0] = try Renderer3D.createMaterial(null, null, null, .{ 1, 1, 1, 1 });
-    }
 
-    const environment_map_data = asset_archive.getAssetData(example_assets.environment_map);
+    const environment_map_data = asset_archive.getAssetData(@intToEnum(asset.Archive.AssetDescriptor, 2));
 
     const scene = try Renderer3D.createScene(
         1, 
@@ -231,6 +234,8 @@ pub fn main() !void
     var camera_enable = false;
     var camera_enable_changed = false;
 
+    const time_at_start = std.time.milliTimestamp();
+
     while (!window.shouldClose())
     {
         const time_begin = std.time.nanoTimestamp();
@@ -270,7 +275,7 @@ pub fn main() !void
             if (camera_enable)
             {
                 const sensitivity = 0.1;
-                const camera_speed = @splat(3, @as(f32, 10)) * @splat(3, delta_time / 1000);
+                const camera_speed = @splat(3, @as(f32, 30)) * @splat(3, delta_time / 1000);
 
                 yaw += x_offset * sensitivity;
                 pitch += y_offset * sensitivity;
@@ -280,9 +285,9 @@ pub fn main() !void
                 camera_front = zalgebra.Vec3.norm(
                     .{ 
                         .data = .{
-                            @cos(zalgebra.toRadians(-yaw)) * @cos(zalgebra.toRadians(pitch)),
+                            @cos(zalgebra.toRadians(yaw)) * @cos(zalgebra.toRadians(-pitch)),
                             @sin(zalgebra.toRadians(pitch)),
-                            @sin(zalgebra.toRadians(-yaw)) * @cos(zalgebra.toRadians(pitch)),
+                            @sin(zalgebra.toRadians(yaw)) * @cos(zalgebra.toRadians(-pitch)),
                         } 
                     }
                 ).data;
@@ -298,11 +303,11 @@ pub fn main() !void
 
                 if (window.window.getKey(.a) == .press)
                 {
-                    camera_position += zalgebra.Vec3.norm(zalgebra.Vec3.cross(.{ .data = camera_front }, .{ .data = camera_up })).mul(.{ .data = camera_speed }).data;
+                    camera_position -= zalgebra.Vec3.norm(zalgebra.Vec3.cross(.{ .data = camera_front }, .{ .data = camera_up })).mul(.{ .data = camera_speed }).data;
                 }
                 else if (window.window.getKey(.d) == .press)
                 {
-                    camera_position -= zalgebra.Vec3.norm(zalgebra.Vec3.cross(.{ .data = camera_front }, .{ .data = camera_up })).mul(.{ .data = camera_speed }).data;
+                    camera_position += zalgebra.Vec3.norm(zalgebra.Vec3.cross(.{ .data = camera_front }, .{ .data = camera_up })).mul(.{ .data = camera_speed }).data;
                 }
             }
 
@@ -321,19 +326,46 @@ pub fn main() !void
         color_image.aspect_mask = .{ .color_bit = true };
 
         {
-            try Renderer3D.beginSceneRender(scene, &.{ Renderer3D.View { .camera = camera } });
+            try Renderer3D.beginSceneRender(
+                scene, 
+                &.{ Renderer3D.View { .camera = camera } },
+                .{ .diffuse = packUnorm4x8(.{ 0.05, 0.05, 0.05, 1 }) },
+                if (false) .{ 
+                    .direction = .{ -0.5, -1, 0.2 },  
+                    .diffuse = packUnorm4x8(.{ 0.15, 0.15, 0.15, 1 }),
+                } else null
+            );
             defer Renderer3D.endSceneRender(scene);
 
             //immediate mode drawing
-            Renderer3D.scenePushMesh(scene, test_scene_meshes[0], test_scene_materials[1], zalgebra.Mat4.identity());
-            Renderer3D.scenePushMesh(scene, test_scene_meshes[3], test_scene_materials[1], zalgebra.Mat4.identity());      
+            // Renderer3D.scenePushMesh(scene, test_scene_meshes[3], test_scene_materials[1], zalgebra.Mat4.identity());      
+
+            if (true)
+            {
+                Renderer3D.scenePushPointLight(scene, .{
+                    .position = .{ 0, 1, -4 },
+                    .intensity = 10 + 40 * std.math.fabs(@sin(@intToFloat(f32, std.time.milliTimestamp() - time_at_start) / 1000)), 
+                    .diffuse = packUnorm4x8(.{ 0.8, 0.4, 0.1, 1 }),
+                });
+
+                Renderer3D.scenePushPointLight(scene, .{
+                    .position = .{ 4, 4, 4 },
+                    .intensity = 10 + 40 * std.math.fabs(@sin(@intToFloat(f32, std.time.milliTimestamp() - time_at_start) / 1000)), 
+                    .diffuse = packUnorm4x8(.{ 0.4, 0.8, 0.1, 1 }),
+                });
+            }
 
             Renderer3D.scenePushPointLight(scene, .{
-                .position = .{ 0, 1, 0 },
-                .intensity = 10,
-                .ambient = packUnorm4x8(.{ 0.01, 0.01, 0.01, 1 }),
-                .diffuse = packUnorm4x8(.{ 0.8, 0.4, 0.1, 1 }),
+                .position = .{ 4.0762, 10, 5.9 },
+                .intensity = 100, 
+                .diffuse = packUnorm4x8(.{ 1, 1, 1, 1 }),
             });
+
+            for (test_scene_import.point_lights) |point_light|
+            {
+                _ = point_light;
+                // Renderer3D.scenePushPointLight(scene, point_light);
+            }
         }
 
         //imgui gui

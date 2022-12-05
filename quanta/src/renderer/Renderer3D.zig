@@ -30,6 +30,9 @@ const ColorPassPushConstants = extern struct
     view_projection: [4][4]f32 align(1),
     point_light_count: u32 align(1),
     view_position: [3]f32 align(1),
+    ambient_light: AmbientLight align(1),
+    directional_light: DirectionalLight align(1),
+    use_directional_light: u32 align(1),
 };
 
 const DepthReducePushData = extern struct 
@@ -500,11 +503,25 @@ pub const Camera = struct
     fov: f32,
 };
 
-pub fn beginSceneRender(scene: SceneHandle, active_views: []const View) !void 
+pub const AmbientLight = extern struct 
+{
+    diffuse: u32,
+};
+
+pub fn beginSceneRender(
+    scene: SceneHandle, 
+    active_views: []const View,
+    ambient_light: AmbientLight,
+    directional_light: ?DirectionalLight,
+    ) !void 
 {
     const scene_data: *Scene = &self.scenes.items[@enumToInt(scene)];
 
     std.debug.assert(active_views.len == 1);
+
+    scene_data.ambient_light = ambient_light;
+    scene_data.directional_light = directional_light orelse undefined;
+    scene_data.enable_directional_light = directional_light != null;
 
     scene_data.dynamic_draw_count = 0;
     scene_data.point_light_count = 0;
@@ -744,13 +761,12 @@ fn endRenderInternal(scene: SceneHandle) !void
 
     const fov: f32 = self.camera.fov;
     const projection = perspectiveProjection(fov, aspect_ratio, near_plane);
-    const view_projection = projection.mul(
-        zalgebra.lookAt(
-            .{ .data = self.camera.translation }, 
-            .{ .data = self.camera.target }, 
-            .{ .data = .{ 0, -1, 0 } }, //May be problematic, we could flip the ndc clip space instead using vk_maintenence_4 
-        )
+    const view = zalgebra.lookAt(
+        .{ .data = self.camera.translation }, 
+        .{ .data = self.camera.target }, 
+        .{ .data = .{ 0, 1, 0 } }, //May be problematic, we could flip the ndc clip space instead using vk_maintenence_4 
     );
+    const view_projection = projection.mul(view);
 
     //sneaky hack due to our incomplete swapchain abstraction
     var color_image: Image = undefined;
@@ -844,7 +860,11 @@ fn endRenderInternal(scene: SceneHandle) !void
             );
             defer command_buffer.endRenderPass();
 
-            command_buffer.setViewport(0, 0, @intToFloat(f32, window.getWidth()), @intToFloat(f32, window.getHeight()), 0, 1);
+            command_buffer.setViewport(
+                0, @intToFloat(f32, window.getHeight()), 
+                @intToFloat(f32, window.getWidth()), -@intToFloat(f32, window.getHeight()), 
+                0, 1
+            );
             command_buffer.setScissor(0, 0, window.getWidth(), window.getHeight());
             command_buffer.setGraphicsPipeline(self.depth_pipeline);
             command_buffer.setIndexBuffer(self.index_buffer, .u32);
@@ -989,7 +1009,11 @@ fn endRenderInternal(scene: SceneHandle) !void
             );
             defer command_buffer.endRenderPass();
 
-            command_buffer.setViewport(0, 0, @intToFloat(f32, window.getWidth()), @intToFloat(f32, window.getHeight()), 0, 1);
+            command_buffer.setViewport(
+                0, @intToFloat(f32, window.getHeight()), 
+                @intToFloat(f32, window.getWidth()), -@intToFloat(f32, window.getHeight()), 
+                0, 1
+            );
             command_buffer.setScissor(0, 0, window.getWidth(), window.getHeight());
 
             command_buffer.setGraphicsPipeline(self.color_pipeline);
@@ -998,6 +1022,9 @@ fn endRenderInternal(scene: SceneHandle) !void
                 .view_projection = view_projection.data,
                 .point_light_count = scene_data.point_light_count,
                 .view_position = self.camera.translation,
+                .ambient_light = scene_data.ambient_light,
+                .directional_light = scene_data.directional_light,
+                .use_directional_light = @boolToInt(scene_data.enable_directional_light),
             });
 
             GraphicsContext.self.vkd.cmdWriteTimestamp2(command_buffer.handle, vk.PipelineStageFlags2
@@ -1032,12 +1059,6 @@ fn endRenderInternal(scene: SceneHandle) !void
 
             if (scene_data.environment_enabled)
             {
-                const view = zalgebra.lookAt(
-                    .{ .data = self.camera.translation }, 
-                    .{ .data = self.camera.target }, 
-                    .{ .data = .{ 0, -1, 0 } }, //May be problematic, we could flip the ndc clip space instead using vk_maintenence_4 
-                );
-
                 command_buffer.setGraphicsPipeline(self.sky_pipeline);
                 command_buffer.setPushData(SkyPipelinePushConstants, 
                 .{ 
@@ -1135,8 +1156,17 @@ pub const View = struct
     camera: Camera,
 };
 
+pub const DirectionalLight = extern struct 
+{
+    direction: [3]f32,
+    diffuse: u32,
+};
+
 const Scene = struct 
 {
+    ambient_light: AmbientLight,
+    directional_light: DirectionalLight,
+    enable_directional_light: bool,
     views: []View,
     
     transforms: [][4][3]f32,
@@ -1366,7 +1396,6 @@ pub const PointLight = extern struct
 {
     position: [3]f32,
     intensity: f32,
-    ambient: u32,
     diffuse: u32,
 };
 
@@ -1489,19 +1518,20 @@ fn packUnorm4x8(v: [4]f32) u32
     });
 }
 
-pub fn createMaterial(
-    albedo_texture_data: ?[]const u8,
-    albedo_texture_width: ?u32,
-    albedo_texture_height: ?u32,
-    albedo_color: [4]f32,
-) !MaterialHandle 
-{
-    const material_handle = @intCast(u32, self.materials.items.len);
+pub const TextureHandle = enum(u32) { _ };
 
-    var albedo_image = try Image.init(
+pub fn createTexture(
+    data: []const u8,
+    width: u32,
+    height: u32,
+) !TextureHandle
+{
+    const texture_handle = @intCast(u32, self.albedo_images.items.len) + 1;
+
+    var image = try Image.init(
         .@"2d",
-        albedo_texture_width orelse 1, 
-        albedo_texture_height orelse 1, 
+        width, 
+        height, 
         1, 
         1,
         .r8g8b8a8_srgb, 
@@ -1511,35 +1541,45 @@ pub fn createMaterial(
             .sampled_bit = true, 
         }
     );
-    errdefer albedo_image.deinit();
+    errdefer image.deinit();
 
-    try self.albedo_images.append(self.allocator, albedo_image);
+    try self.albedo_images.append(self.allocator, image);
 
-    var albedo_staging_buffer = try graphics.Buffer.initData(
+    var staging_buffer = try graphics.Buffer.initData(
         u8, 
-        albedo_texture_data orelse 
-        @ptrCast([*]const u8, &[_]u32 { std.math.maxInt(u32) })[0..@sizeOf(u32)], 
+        data, 
         .staging
     ); 
-    errdefer albedo_staging_buffer.deinit();
+    errdefer staging_buffer.deinit();
 
-    var albedo_transfer_event = try graphics.Event.init();
-    errdefer albedo_transfer_event.deinit();
+    var transfer_event = try graphics.Event.init();
+    errdefer transfer_event.deinit();
 
-    try self.image_transfer_events.append(self.allocator, albedo_transfer_event);
-    try self.image_staging_buffers.append(self.allocator, albedo_staging_buffer);
+    try self.image_transfer_events.append(self.allocator, transfer_event);
+    try self.image_staging_buffers.append(self.allocator, staging_buffer);
 
-    var albedo_sampler = try Sampler.init(.nearest, .nearest, null);
-    errdefer albedo_sampler.deinit();
+    var sampler = try Sampler.init(.nearest, .nearest, null);
+    errdefer sampler.deinit();
     
-    try self.albedo_samplers.append(self.allocator, albedo_sampler);
+    try self.albedo_samplers.append(self.allocator, sampler);
+
+    self.color_pipeline.setDescriptorImageSampler(6, texture_handle, image, sampler);
+
+    return @intToEnum(TextureHandle, texture_handle);
+}
+
+pub fn createMaterial(
+    albedo_texture: ?TextureHandle,
+    albedo_color: [4]f32,
+) !MaterialHandle 
+{
+    const material_handle = @intCast(u32, self.materials.items.len);
+    const albedo_handle = if (albedo_texture != null) @enumToInt(albedo_texture.?) else 0;
 
     std.log.debug("Created material {}", .{ material_handle });
 
-    self.color_pipeline.setDescriptorImageSampler(6, material_handle, albedo_image, albedo_sampler);
-
     try self.materials.append(self.allocator, .{
-        .albedo_texture_index = material_handle,
+        .albedo_texture_index = albedo_handle,
         .albedo_color = packUnorm4x8(albedo_color)
     });
 

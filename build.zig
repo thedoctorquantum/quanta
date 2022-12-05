@@ -186,7 +186,7 @@ pub fn build(builder: *std.build.Builder) !void
         const exe = builder.addExecutable("example_assets", "example/src/asset_build.zig");
 
         exe.setTarget(std.zig.CrossTarget.fromTarget(builder.host.target));
-        exe.setBuildMode(.ReleaseFast);
+        exe.setBuildMode(mode);
         exe.install();
 
         try buildQuanta(builder, exe, quanta_prebuild);

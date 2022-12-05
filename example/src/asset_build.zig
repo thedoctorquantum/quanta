@@ -19,7 +19,7 @@ pub fn main() !void
     var assets = std.ArrayListUnmanaged(asset.Archive.AssetDescription) {};
     defer assets.deinit(allocator);
 
-    if (true)
+    if (false)
     {   
         const sponza = try gltf.import(allocator, "example/src/assets/sponza/Sponza.gltf");
         defer gltf.importFree(sponza, allocator);
@@ -32,6 +32,12 @@ pub fn main() !void
             .mapped_data_size = sponza_encoded.len,
         });
     }
+
+    // try assets.append(allocator, .{
+    //     .source_data = &[_]u8 { 0xff },
+    //     .source_data_alignment = 1,
+    //     .mapped_data_size = 1,
+    // });
 
     const gm_construct_bsp = try quanta.asset.importers.bsp.importFile(allocator, "example/src/assets/gm_construct.bsp");
     defer quanta.asset.importers.bsp.importFree(allocator, gm_construct_bsp);
@@ -78,6 +84,28 @@ pub fn main() !void
         .source_data_alignment = @alignOf(u32),
         .mapped_data_size = environment_map.data.len,
     });
+
+    const test_scene = try gltf.import(allocator, "example/src/assets/test_scene/test_scene.gltf");
+    defer gltf.importFree(test_scene, allocator);
+
+    const test_scene_encoded = try gltf.encode(allocator, test_scene);    
+
+    try assets.append(allocator, .{
+        .source_data = test_scene_encoded,
+        .source_data_alignment = @alignOf(gltf.ImportBinHeader),
+        .mapped_data_size = test_scene_encoded.len,
+    });
+
+    // const lights_test = try gltf.import(allocator, "example/src/assets/light_test.gltf");
+    // defer gltf.importFree(lights_test, allocator);
+
+    // const lights_test_encoded = try gltf.encode(allocator, lights_test);    
+
+    // try assets.append(allocator, .{
+    //     .source_data = lights_test_encoded,
+    //     .source_data_alignment = @alignOf(gltf.ImportBinHeader),
+    //     .mapped_data_size = lights_test_encoded.len,
+    // });
 
     const asset_archive = try asset.Archive.encode(allocator, assets.items);
 

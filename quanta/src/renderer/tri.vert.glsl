@@ -74,7 +74,7 @@ void main()
 
     out_data.position = vec3(translation);
     out_data.color = unpackUnorm4x8(vertex.color);
-    out_data.normal = vertex.normal;
+    out_data.normal = mat3(transpose(inverse(transform))) * vertex.normal;
     out_data.uv = vertex.uv;
     out_data.material_index = material_indices[instance_index]; 
     out_data.primitive_index = gl_VertexIndex / 3; 

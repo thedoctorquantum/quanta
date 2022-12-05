@@ -12,6 +12,7 @@ pub const Import = struct
     sub_meshes: []SubMesh,
     materials: []Material,
     textures: []Texture,
+    point_lights: []Renderer3D.PointLight,
 
     pub const SubMesh = extern struct 
     {
@@ -41,6 +42,8 @@ pub const Import = struct
 
 pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import 
 {
+    @setRuntimeSafety(false);
+
     var import_data: Import = .{
         .vertex_positions = &.{},
         .vertices = &.{},
@@ -48,6 +51,7 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
         .sub_meshes = &.{},
         .materials = &.{},
         .textures = &.{},
+        .point_lights = &.{},
     };
 
     var cgltf_data: [*c]cgltf.cgltf_data = null;
@@ -188,11 +192,65 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
         }
     }
 
-    const nodes = cgltf_data.*.scene.*.nodes[0..cgltf_data.*.nodes_count];
+    var point_lights = std.ArrayListUnmanaged(Renderer3D.PointLight) {};
+    defer point_lights.deinit(allocator);
+
+    const lights = cgltf_data.*.lights[0..cgltf_data.*.lights_count];
+
+    for (lights) |light|
+    {
+        switch (light.type)
+        {
+            cgltf.cgltf_light_type_point => {
+                const point_light = Renderer3D.PointLight 
+                {
+                    .position = .{ 0, -1, 0 },
+                    .intensity = light.intensity,
+                    .diffuse = packUnorm4x8(.{ light.color[0], light.color[1], light.color[2], 1 }),
+                };
+
+                std.log.info("Found point light: {}", .{ point_light });
+
+                try point_lights.append(allocator, point_light);
+            },
+            else => unreachable,
+        }
+    }
+
+    const nodes = cgltf_data.*.scene.*.nodes[0..cgltf_data.*.nodes_count - 1];
+
+    std.log.info("Nodes: {}", .{ nodes.len });
 
     for (nodes) |node_ptr|
     {
         if (node_ptr == null) continue;
+
+        if (node_ptr.*.light != null)
+        {
+            const light: cgltf.cgltf_light = node_ptr.*.light.*;
+
+            switch (light.type)
+            {
+                cgltf.cgltf_light_type_point => {
+                    const point_light = Renderer3D.PointLight 
+                    {
+                        .position = node_ptr.*.translation,
+                        .intensity = light.intensity,
+                        .diffuse = packUnorm4x8(.{ light.color[0], light.color[1], light.color[2], 1 }),
+                    };
+
+                    std.log.info("Found point light: {}", .{ point_light });
+
+                    try point_lights.append(allocator, point_light);
+                },
+                else => unreachable,
+            }
+
+            // continue;
+
+            unreachable;
+        }
+
         if (node_ptr.*.mesh == null) continue;
 
         var transform_matrix: [4][4]f32 = undefined;
@@ -317,12 +375,9 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                         const indices = @ptrCast([*]u32, 
                             @alignCast(@alignOf(u32), 
                                 @ptrCast([*]u8, index_buffer.*.data.?) + index_accessor.offset + index_buffer_view.*.offset))
-                                [0..index_accessor.count];                        
+                                [0..index_accessor.count];
 
-                        for (indices) |index|
-                        {
-                            try model_indices.append(index);
-                        }
+                        try model_indices.appendSlice(indices);                        
                     },
                     else => unreachable,
                 }
@@ -342,16 +397,15 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                     pbr.base_color_texture.texture.*.image != null and 
                     pbr.base_color_texture.texture.*.image.*.uri != null;
 
+                var albedo_index: ?u32 = null;
+
                 if (has_albedo)
                 {
-                    
-                    var albedo_index: u32 = 0;
-
                     for (gltf_images) |*gltf_image, i|
                     {
                         if (gltf_image == pbr.base_color_texture.texture.*.image)
                         {
-                            albedo_index = @intCast(u32, i);
+                            albedo_index = @intCast(u32, i) + 1;
 
                             break;
                         }
@@ -359,14 +413,14 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
 
                     //O(n), very bad code...
                     // const albedo_index = std.mem.indexOf(cgltf.cgltf_image, gltf_images, &.{ pbr.base_color_texture.texture.*.image }) orelse unreachable;
-
-                    material_index = @intCast(u32, materials.items.len);
-
-                    try materials.append(.{
-                        .albedo = .{ 1, 1, 1, 1 },
-                        .albedo_texture_index = albedo_index,
-                    });
                 }
+
+                material_index = @intCast(u32, materials.items.len);
+
+                try materials.append(.{
+                    .albedo = pbr.base_color_factor,
+                    .albedo_texture_index = albedo_index orelse 0,
+                });
             }
 
             try sub_meshes.append(.{
@@ -391,6 +445,7 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
     import_data.sub_meshes = sub_meshes.toOwnedSlice();
     import_data.materials = materials.toOwnedSlice();
     import_data.textures = textures.toOwnedSlice();
+    import_data.point_lights = point_lights.toOwnedSlice(allocator);
 
     return import_data;
 }
@@ -403,6 +458,7 @@ pub fn importFree(gltf_import: Import, allocator: std.mem.Allocator) void
     allocator.free(gltf_import.sub_meshes);
     allocator.free(gltf_import.materials);
     allocator.free(gltf_import.textures);
+    allocator.free(gltf_import.point_lights);
 }
 
 ///Header for the binary format
@@ -413,6 +469,7 @@ pub const ImportBinHeader = packed struct
     sub_mesh_count: u32,
     material_count: u32,
     texture_count: u32,
+    point_light_count: u32,
 };
 
 pub const ImportBinTexture = packed struct 
@@ -429,7 +486,7 @@ pub fn encode(allocator: std.mem.Allocator, import_data: Import) ![]const u8
 {
     var size: usize = 0;
 
-    size = std.mem.alignForward(size, @alignOf(ImportBinHeader));
+    // size = std.mem.alignForward(size, @alignOf(ImportBinHeader));
     size += @sizeOf(ImportBinHeader);    
 
     size = std.mem.alignForward(size, @alignOf([3]f32));
@@ -459,6 +516,9 @@ pub fn encode(allocator: std.mem.Allocator, import_data: Import) ![]const u8
 
     size += texture_data_size;
 
+    size = std.mem.alignForward(size, @alignOf(Renderer3D.PointLight));
+    size += @sizeOf(Renderer3D.PointLight) * import_data.point_lights.len;
+
     const data = try allocator.alloc(u8, size);
 
     var data_fba = std.heap.FixedBufferAllocator.init(data); 
@@ -472,6 +532,7 @@ pub fn encode(allocator: std.mem.Allocator, import_data: Import) ![]const u8
     header.sub_mesh_count = @intCast(u32, import_data.sub_meshes.len);
     header.material_count = @intCast(u32, import_data.materials.len);
     header.texture_count = @intCast(u32, import_data.textures.len);
+    header.point_light_count = @intCast(u32, import_data.point_lights.len);
 
     _ = try fba.dupe([3]f32, import_data.vertex_positions);
     _ = try fba.dupe(Renderer3D.Vertex, import_data.vertices);
@@ -492,6 +553,10 @@ pub fn encode(allocator: std.mem.Allocator, import_data: Import) ![]const u8
         };
     }
 
+    std.log.info("point_light_offset: {}", .{ data_fba.end_index });
+
+    _ = try fba.dupe(Renderer3D.PointLight, import_data.point_lights);
+
     return data_fba.buffer[0..data_fba.end_index];
 }
 
@@ -506,6 +571,7 @@ pub fn decode(allocator: std.mem.Allocator, data: []u8) !Import
         .sub_meshes = &.{},
         .materials = &.{},
         .textures = &.{},   
+        .point_lights = &.{},
     };
 
     var offset: usize = 0;
@@ -514,7 +580,6 @@ pub fn decode(allocator: std.mem.Allocator, data: []u8) !Import
 
     std.log.info("header: {}", .{ header });
 
-    offset = std.mem.alignForward(offset, @alignOf(ImportBinHeader));
     offset += @sizeOf(ImportBinHeader);
 
     const vertex_positions_offset = offset;
@@ -567,13 +632,27 @@ pub fn decode(allocator: std.mem.Allocator, data: []u8) !Import
 
             current_texture_data_offset += bin_texture.data_size;
         }
+
+        offset = current_texture_data_offset;
     }
+
+    // offset = std.mem.alignForward(offset, @alignOf(Renderer3D.PointLight));
+
+    const point_light_offset = offset;
+
+    offset += @sizeOf(Renderer3D.PointLight) * header.point_light_count;
 
     import_data.vertex_positions = @ptrCast([*][3]f32, @alignCast(@alignOf([3]f32), data.ptr + vertex_positions_offset))[0..header.vertex_count];
     import_data.vertices = @ptrCast([*]Renderer3D.Vertex, @alignCast(@alignOf(Renderer3D.Vertex), data.ptr + vertices_offset))[0..header.vertex_count];
     import_data.indices = @ptrCast([*]u32, @alignCast(@alignOf(u32), data.ptr + indices_offset))[0..header.index_count];
     import_data.sub_meshes = @ptrCast([*]Import.SubMesh, @alignCast(@alignOf(Import.SubMesh), data.ptr + sub_meshs_offset))[0..header.sub_mesh_count];
     import_data.materials = @ptrCast([*]Import.Material, @alignCast(@alignOf(Import.Material), data.ptr + materials_offset))[0..header.material_count];
+    import_data.point_lights = @ptrCast([*]Renderer3D.PointLight, @alignCast(@alignOf(Renderer3D.PointLight), data.ptr + point_light_offset - 8))[0..header.point_light_count];
+
+    for (import_data.point_lights) |point_light|
+    {
+        std.log.info("{}", .{ point_light });
+    }
 
     return import_data;
 }
