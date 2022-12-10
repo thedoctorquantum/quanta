@@ -49,11 +49,11 @@ out vec4 output_color;
 struct Material
 {
     uint albedo_index;
-    uint albedo_color;
-    // uint metalness_index;
-    // float metalness;
-    // uint roughness_index;
-    // float roughness;
+    uint albedo;
+    uint metalness_index;
+    float metalness;
+    uint roughness_index;
+    float roughness;
 };
 
 layout(binding = 5, scalar) restrict readonly buffer Materials
@@ -120,6 +120,8 @@ vec4 directionalLightContribution(DirectionalLight directional_light, vec3 norma
 
 vec4 pointLightContribution(
     vec4 albedo,
+    float roughness,
+    float metallic,
     vec3 F0,
     PointLight point_light, 
     vec3 normal, 
@@ -127,10 +129,6 @@ vec4 pointLightContribution(
     vec3 view_direction
 ) 
 {
-    //material params
-    float roughness = 0.5;
-    float metallic = 0.8;
-
     vec4 light_color = unpackUnorm4x8(point_light.diffuse);
 
     vec3 light_direction = normalize(point_light.position - position);
@@ -153,8 +151,6 @@ vec4 pointLightContribution(
     float denominator = 4.0 * max(dot(normal, view_direction), 0.0) * n_dot_l + 0.0001;
     vec3 specular = numerator / denominator;  
 
-    // float diffuse_factor = max(dot(normal, light_direction), 0);
-    // return diffuse_factor * radiance; 
     return vec4((kD * albedo.rgb / PI + specular) * radiance * n_dot_l, 0); 
 }
 
@@ -164,13 +160,18 @@ void main()
 
     vec3 view_direction = normalize(constants.view_position - in_data.position);
 
-    vec4 albedo = in_data.color * unpackUnorm4x8(material.albedo_color);
-    float roughness = 0.5;
-    float metallic = 0.8;
+    vec4 albedo = in_data.color * unpackUnorm4x8(material.albedo);
+    float roughness = material.roughness;
+    float metallic = material.metalness;
 
     if (material.albedo_index != 0)
     {
         albedo *= texture(samplers[nonuniformEXT(material.albedo_index)], in_data.uv);
+    }
+
+    if (material.metalness_index != 0)
+    {
+        metallic *= texture(samplers[nonuniformEXT(material.metalness_index)], in_data.uv).r;
     }
 
     vec4 ambient_light = unpackUnorm4x8(constants.ambient_light.diffuse); 
@@ -182,7 +183,7 @@ void main()
 
     if (constants.use_directional_light)
     {
-        light_color = directionalLightContribution(constants.directional_light, in_data.normal, in_data.position, constants.view_position);
+        light_color += directionalLightContribution(constants.directional_light, in_data.normal, in_data.position, constants.view_position);
     }
 
     uint point_light_count = constants.point_light_count;
@@ -194,7 +195,16 @@ void main()
         {
             PointLight point_light = point_lights[i];
 
-            light_color += pointLightContribution(albedo, F0, point_light, in_data.normal, in_data.position, view_direction);
+            light_color += pointLightContribution(
+                albedo,
+                roughness,
+                metallic, 
+                F0, 
+                point_light, 
+                in_data.normal, 
+                in_data.position, 
+                view_direction
+            );
 
             i += 1;
         }

@@ -94,6 +94,7 @@ fn preBuildQuanta(mode: std.builtin.Mode, builder: *std.build.Builder) !PreBuild
     const renderer_pre_depth_cull_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/pre_depth_cull.comp.glsl", "quanta/src/renderer/spirv/pre_depth_cull.comp.spv");
     const renderer_post_depth_cull_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/post_depth_cull.comp.glsl", "quanta/src/renderer/spirv/post_depth_cull.comp.spv");
     const renderer_depth_reduce_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/depth_reduce.comp.glsl", "quanta/src/renderer/spirv/depth_reduce.comp.spv");
+    const renderer_color_resolve_comp_glsl = try compileShader(builder, mode, "comp", "quanta/src/renderer/color_resolve.comp.glsl", "quanta/src/renderer/spirv/color_resolve.comp.spv");
 
     const renderer_gui_rectangle_vert_glsl = try compileShader(builder, mode, "vert", "quanta/src/renderer_gui/rectangle.vert.glsl", "quanta/src/renderer_gui/spirv/rectangle.vert.spv");
     const renderer_gui_rectangle_frag_glsl = try compileShader(builder, mode, "frag", "quanta/src/renderer_gui/rectangle.frag.glsl", "quanta/src/renderer_gui/spirv/rectangle.frag.spv");
@@ -111,6 +112,7 @@ fn preBuildQuanta(mode: std.builtin.Mode, builder: *std.build.Builder) !PreBuild
     options.step.dependOn(renderer_pre_depth_cull_comp_glsl.step);
     options.step.dependOn(renderer_post_depth_cull_comp_glsl.step);
     options.step.dependOn(renderer_depth_reduce_comp_glsl.step);
+    options.step.dependOn(renderer_color_resolve_comp_glsl.step);
     options.step.dependOn(renderer_gui_rectangle_vert_glsl.step);
     options.step.dependOn(renderer_gui_rectangle_frag_glsl.step);
     options.step.dependOn(renderer_gui_mesh_vert_glsl.step);

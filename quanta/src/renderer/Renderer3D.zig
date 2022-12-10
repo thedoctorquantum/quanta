@@ -73,6 +73,7 @@ pub var self: Renderer3D = undefined;
 
 allocator: std.mem.Allocator,
 swapchain: *graphics.Swapchain,
+radiance_color_image: graphics.Image,
 depth_image: graphics.Image,
 depth_pyramid: graphics.Image,
 depth_pyramid_levels: []Image.View,
@@ -106,6 +107,7 @@ post_depth_cull_pipeline: graphics.ComputePipeline,
 depth_pipeline: graphics.GraphicsPipeline,
 color_pipeline: graphics.GraphicsPipeline,
 sky_pipeline: graphics.GraphicsPipeline,
+color_resolve_pipeline: graphics.ComputePipeline,
 
 meshes: std.ArrayListUnmanaged(Mesh),
 mesh_buffer: graphics.Buffer,
@@ -118,8 +120,8 @@ materials_buffer: graphics.Buffer,
 
 scenes: std.ArrayListUnmanaged(Scene),
 
-albedo_images: std.ArrayListUnmanaged(Image),
-albedo_samplers: std.ArrayListUnmanaged(Sampler),
+texture_images: std.ArrayListUnmanaged(Image),
+texture_samplers: std.ArrayListUnmanaged(Sampler),
 
 camera: Camera,
 
@@ -160,6 +162,19 @@ fn initFrameImages(window_width: u32, window_height: u32) !void
 {
     const render_width = window_width;
     const render_height = window_height;
+
+    self.radiance_color_image = try Image.init(
+        .@"2d", 
+        render_width, render_height, 1, 1, 
+        vk.Format.r16g16b16a16_sfloat, 
+        vk.ImageLayout.attachment_optimal, 
+        .{
+            .color_attachment_bit = true,
+            .storage_bit = true,
+            .sampled_bit = true,
+        }
+    );
+    errdefer self.radiance_color_image.deinit();
 
     self.depth_image = try Image.init(
         .@"2d",
@@ -219,6 +234,7 @@ fn initFrameImages(window_width: u32, window_height: u32) !void
 
 fn deinitFrameImages() void
 {
+    defer self.radiance_color_image.deinit();
     defer self.depth_image.deinit();
     defer self.depth_pyramid.deinit();
     defer self.allocator.free(self.depth_pyramid_levels);
@@ -264,8 +280,8 @@ pub fn init(
     errdefer allocator.free(self.command_buffers);
 
     self.materials = .{};
-    self.albedo_images = .{};
-    self.albedo_samplers = .{};
+    self.texture_images = .{};
+    self.texture_samplers = .{};
 
     for (self.command_buffers) |*command_buffer|
     {
@@ -330,7 +346,9 @@ pub fn init(
         .{
             .color_attachment_formats = &[_]vk.Format 
             {
-                swapchain.surface_format.format,
+                //use when drawing directly to swapchain image
+                // swapchain.surface_format.format,
+                self.radiance_color_image.format
             },
             .depth_attachment_format = self.depth_image.format,
             .vertex_shader_binary = @alignCast(4, @import("renderer_shaders").tri_vert_spv),
@@ -355,7 +373,7 @@ pub fn init(
         .{
             .color_attachment_formats = &[_]vk.Format 
             {
-                swapchain.surface_format.format,
+                self.radiance_color_image.format,
             },
             .depth_attachment_format = self.depth_image.format,
             .vertex_shader_binary = @alignCast(4, @embedFile("spirv/sky.vert.spv")),
@@ -396,6 +414,15 @@ pub fn init(
         DepthPassPushConstants,
     );
     errdefer self.depth_pipeline.deinit(allocator);
+
+    self.color_resolve_pipeline = try graphics.ComputePipeline.init(
+        allocator, 
+        @alignCast(4, @embedFile("spirv/color_resolve.comp.spv")), 
+        .@"2d", 
+        null, 
+        null
+    );
+    errdefer self.color_resolve_pipeline.deinit(self.allocator);
 
     self.materials_buffer = try graphics.Buffer.init(1024 * @sizeOf(Material), .storage);
     errdefer self.materials_buffer.deinit();
@@ -478,17 +505,18 @@ pub fn deinit() void
     defer self.depth_pipeline.deinit(self.allocator);
     defer self.color_pipeline.deinit(self.allocator);
     defer self.sky_pipeline.deinit(self.allocator);
+    defer self.color_resolve_pipeline.deinit(self.allocator);
     defer self.meshes.deinit(self.allocator);
     defer self.mesh_lods.deinit(self.allocator);
     defer self.materials.deinit(self.allocator);
     defer self.materials_buffer.deinit();
-    defer self.albedo_images.deinit(self.allocator);
-    defer for (self.albedo_images.items) |*image|
+    defer self.texture_images.deinit(self.allocator);
+    defer for (self.texture_images.items) |*image|
     {
         image.deinit();
     };
-    defer self.albedo_samplers.deinit(self.allocator);
-    defer for (self.albedo_samplers.items) |*sampler|
+    defer self.texture_samplers.deinit(self.allocator);
+    defer for (self.texture_samplers.items) |*sampler|
     {
         sampler.deinit();
     };
@@ -580,7 +608,7 @@ pub fn beginSceneRender(
 
                 for (self.image_staging_buffers.items) |staging_buffer, i|
                 {
-                    self.transfer_command_buffer.copyBufferToImage(staging_buffer, self.albedo_images.items[i]);
+                    self.transfer_command_buffer.copyBufferToImage(staging_buffer, self.texture_images.items[i]);
 
                     GraphicsContext.self.vkd.cmdSetEvent2(
                         self.transfer_command_buffer.handle, 
@@ -604,12 +632,12 @@ pub fn beginSceneRender(
                                     .dst_access_mask = .{},
                                     .dst_stage_mask = .{},
                                     .old_layout = .transfer_dst_optimal,
-                                    .new_layout = self.albedo_images.items[i].layout,
+                                    .new_layout = self.texture_images.items[i].layout,
                                     .src_queue_family_index = GraphicsContext.self.transfer_family_index.?,
                                     .dst_queue_family_index = GraphicsContext.self.graphics_family_index.?,
-                                    .image = self.albedo_images.items[i].handle,
+                                    .image = self.texture_images.items[i].handle,
                                     .subresource_range = .{
-                                        .aspect_mask = self.albedo_images.items[i].aspect_mask,
+                                        .aspect_mask = self.texture_images.items[i].aspect_mask,
                                         .base_mip_level = 0,
                                         .level_count = vk.REMAINING_MIP_LEVELS,
                                         .base_array_layer = 0,
@@ -764,7 +792,7 @@ fn endRenderInternal(scene: SceneHandle) !void
     const view = zalgebra.lookAt(
         .{ .data = self.camera.translation }, 
         .{ .data = self.camera.target }, 
-        .{ .data = .{ 0, 1, 0 } }, //May be problematic, we could flip the ndc clip space instead using vk_maintenence_4 
+        .{ .data = .{ 0, 1, 0 } },
     );
     const view_projection = projection.mul(view);
 
@@ -980,6 +1008,14 @@ fn endRenderInternal(scene: SceneHandle) !void
 
         }
 
+        command_buffer.imageBarrier(self.radiance_color_image, .{
+            .source_stage = .{ .compute_shader = true },
+            .source_access = .{ .shader_read = true },
+            .destination_stage = .{ .color_attachment_output = true, },
+            .destination_access = .{  .color_attachment_write = true, },
+            .destination_layout = .attachment_optimal,
+        });
+
         //Forward Color Pass
         {
             command_buffer.imageBarrier(color_image, .{
@@ -997,7 +1033,7 @@ fn endRenderInternal(scene: SceneHandle) !void
                 window.getHeight(), 
                 &[_]graphics.CommandBuffer.Attachment {
                     .{
-                        .image = &color_image,
+                        .image = &self.radiance_color_image,
                         .clear = if (!scene_data.environment_enabled) .{ .color = .{ 0, 0, 0, 1 } } else null
                     }
                 }, 
@@ -1082,10 +1118,37 @@ fn endRenderInternal(scene: SceneHandle) !void
             }, self.timeline_query_pool, 3);
         }
 
-        command_buffer.imageBarrier(color_image, .{
+        command_buffer.imageBarrier(self.radiance_color_image, .{
             .source_stage = .{ .color_attachment_output = true, },
-            .source_access = .{  .color_attachment_write = true },
+            .source_access = .{  .color_attachment_write = true, },
             .source_layout = .attachment_optimal,
+            .destination_stage = .{ .compute_shader = true },
+            .destination_access = .{ .shader_read = true },
+            .destination_layout = vk.ImageLayout.shader_read_only_optimal,
+        });
+
+        command_buffer.imageBarrier(color_image, .{
+            .source_stage = .{},
+            .source_access = .{},
+            .source_layout = .undefined,
+            .destination_stage = .{ .compute_shader = true, },
+            .destination_access = .{  .shader_write = true },
+            .destination_layout = vk.ImageLayout.general,
+        });
+
+        //Color resolve
+        {
+            self.color_resolve_pipeline.setDescriptorImageWithLayout(0, 0, self.radiance_color_image, .general);
+            self.color_resolve_pipeline.setDescriptorImageWithLayout(1, 0, color_image, .general);
+
+            command_buffer.setComputePipeline(self.color_resolve_pipeline);
+            command_buffer.computeDispatch(self.radiance_color_image.width, self.radiance_color_image.height, 1);
+        }
+
+        command_buffer.imageBarrier(color_image, .{
+            .source_stage = .{ .compute_shader = true, },
+            .source_access = .{  .shader_write = true },
+            .source_layout = vk.ImageLayout.general,
             .destination_stage = .{},
             .destination_access = .{},
             .destination_layout = .present_src_khr,
@@ -1490,7 +1553,11 @@ pub fn createMesh(
 const Material = extern struct 
 {
     albedo_texture_index: u32,
-    albedo_color: u32,
+    albedo: u32,
+    metalness_texture_index: u32,
+    metalness: f32,
+    roughness_texture_index: u32,
+    roughness: f32,
 };
 
 pub const MaterialHandle = enum(u32) { _ };
@@ -1526,7 +1593,7 @@ pub fn createTexture(
     height: u32,
 ) !TextureHandle
 {
-    const texture_handle = @intCast(u32, self.albedo_images.items.len) + 1;
+    const texture_handle = @intCast(u32, self.texture_images.items.len) + 1;
 
     var image = try Image.init(
         .@"2d",
@@ -1543,7 +1610,7 @@ pub fn createTexture(
     );
     errdefer image.deinit();
 
-    try self.albedo_images.append(self.allocator, image);
+    try self.texture_images.append(self.allocator, image);
 
     var staging_buffer = try graphics.Buffer.initData(
         u8, 
@@ -1561,7 +1628,7 @@ pub fn createTexture(
     var sampler = try Sampler.init(.nearest, .nearest, null);
     errdefer sampler.deinit();
     
-    try self.albedo_samplers.append(self.allocator, sampler);
+    try self.texture_samplers.append(self.allocator, sampler);
 
     self.color_pipeline.setDescriptorImageSampler(6, texture_handle, image, sampler);
 
@@ -1571,16 +1638,26 @@ pub fn createTexture(
 pub fn createMaterial(
     albedo_texture: ?TextureHandle,
     albedo_color: [4]f32,
+    metalness_texture: ?TextureHandle,
+    metalness: f32,
+    roughness_texture: ?TextureHandle,
+    roughness: f32,
 ) !MaterialHandle 
 {
     const material_handle = @intCast(u32, self.materials.items.len);
     const albedo_handle = if (albedo_texture != null) @enumToInt(albedo_texture.?) else 0;
+    const metalness_handle = if (metalness_texture != null) @enumToInt(metalness_texture.?) else 0;
+    const roughness_handle = if (roughness_texture != null) @enumToInt(roughness_texture.?) else 0;
 
     std.log.debug("Created material {}", .{ material_handle });
 
     try self.materials.append(self.allocator, .{
         .albedo_texture_index = albedo_handle,
-        .albedo_color = packUnorm4x8(albedo_color)
+        .albedo = packUnorm4x8(albedo_color),
+        .metalness_texture_index = metalness_handle,
+        .metalness = metalness,
+        .roughness_texture_index = roughness_handle,
+        .roughness = roughness,
     });
 
     self.material_data_changed = true;

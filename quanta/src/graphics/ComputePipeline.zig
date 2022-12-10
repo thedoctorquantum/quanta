@@ -304,6 +304,42 @@ pub fn setDescriptorImage(
     );
 }
 
+pub fn setDescriptorImageWithLayout(
+    self: *ComputePipeline,    
+    index: u32,
+    array_index: u32,
+    image: Image,
+    layout: vk.ImageLayout,
+) void
+{
+    Context.self.vkd.updateDescriptorSets(
+        Context.self.device, 
+        1, 
+        &[_]vk.WriteDescriptorSet
+        {
+            .{
+                .dst_set = self.descriptor_sets[0],
+                .dst_binding = index,
+                .dst_array_element = array_index,
+                .descriptor_count = 1,
+                .descriptor_type = .storage_image,
+                .p_image_info = &[_]vk.DescriptorImageInfo 
+                {
+                    .{
+                        .sampler = .null_handle,
+                        .image_view = image.view,
+                        .image_layout = layout,
+                    }
+                },
+                .p_buffer_info = undefined,
+                .p_texel_buffer_view = undefined,
+            },
+        }, 
+        0, 
+        undefined,
+    );
+}
+
 pub fn setDescriptorImageView(
     self: *ComputePipeline,    
     index: u32,

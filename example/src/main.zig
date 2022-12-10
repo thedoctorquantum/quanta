@@ -187,6 +187,10 @@ pub fn main() !void
             test_scene_materials[i] = try Renderer3D.createMaterial(
                 if (material.albedo_texture_index != 0) test_scene_textures[material.albedo_texture_index - 1] else null,
                 material.albedo,
+                null,
+                0,
+                null,
+                1,
             );
         }
     }
@@ -329,7 +333,7 @@ pub fn main() !void
             try Renderer3D.beginSceneRender(
                 scene, 
                 &.{ Renderer3D.View { .camera = camera } },
-                .{ .diffuse = packUnorm4x8(.{ 0.05, 0.05, 0.05, 1 }) },
+                .{ .diffuse = packUnorm4x8(.{ 0, 0, 0, 1 }) },
                 if (false) .{ 
                     .direction = .{ -0.5, -1, 0.2 },  
                     .diffuse = packUnorm4x8(.{ 0.15, 0.15, 0.15, 1 }),
@@ -353,11 +357,23 @@ pub fn main() !void
                     .intensity = 10 + 40 * std.math.fabs(@sin(@intToFloat(f32, std.time.milliTimestamp() - time_at_start) / 1000)), 
                     .diffuse = packUnorm4x8(.{ 0.4, 0.8, 0.1, 1 }),
                 });
+
+                Renderer3D.scenePushPointLight(scene, .{
+                    .position = .{ 80, 4, 4 },
+                    .intensity = 400 + 600 * std.math.fabs(@sin(@intToFloat(f32, std.time.milliTimestamp() - time_at_start) / 1000)), 
+                    .diffuse = packUnorm4x8(.{ 0.6, 0.6, 0.8, 1 }),
+                });
+
+                Renderer3D.scenePushPointLight(scene, .{
+                    .position = .{ -80, 4, 4 },
+                    .intensity = 600 + 600 * std.math.fabs(@sin(@intToFloat(f32, std.time.milliTimestamp() - time_at_start) / 1000)), 
+                    .diffuse = packUnorm4x8(.{ 0.8, 0.5, 0.5, 1 }),
+                });
             }
 
             Renderer3D.scenePushPointLight(scene, .{
-                .position = .{ 4.0762, 10, 5.9 },
-                .intensity = 100, 
+                .position = .{ 4.0762, 35, 5.9 },
+                .intensity = 1000, 
                 .diffuse = packUnorm4x8(.{ 1, 1, 1, 1 }),
             });
 
