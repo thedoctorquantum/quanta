@@ -35,6 +35,11 @@ const ColorPassPushConstants = extern struct
     use_directional_light: u32 align(1),
 };
 
+const ColorResolvePushData = extern struct 
+{
+    exposure: f32,
+};
+
 const DepthReducePushData = extern struct 
 {
     image_size: [2]f32,
@@ -420,7 +425,7 @@ pub fn init(
         @alignCast(4, @embedFile("spirv/color_resolve.comp.spv")), 
         .@"2d", 
         null, 
-        null
+        ColorResolvePushData
     );
     errdefer self.color_resolve_pipeline.deinit(self.allocator);
 
@@ -529,6 +534,7 @@ pub const Camera = struct
     translation: [3]f32,
     target: [3]f32,
     fov: f32,
+    exposure: f32,
 };
 
 pub const AmbientLight = extern struct 
@@ -1142,6 +1148,7 @@ fn endRenderInternal(scene: SceneHandle) !void
             self.color_resolve_pipeline.setDescriptorImageWithLayout(1, 0, color_image, .general);
 
             command_buffer.setComputePipeline(self.color_resolve_pipeline);
+            command_buffer.setPushData(ColorResolvePushData, .{ .exposure = self.camera.exposure });
             command_buffer.computeDispatch(self.radiance_color_image.width, self.radiance_color_image.height, 1);
         }
 
@@ -1222,6 +1229,7 @@ pub const View = struct
 pub const DirectionalLight = extern struct 
 {
     direction: [3]f32,
+    intensity: f32,
     diffuse: u32,
 };
 
@@ -1358,6 +1366,7 @@ pub fn createScene(
     self.color_pipeline.setDescriptorBuffer(3, 0, scene.material_indices_buffer);
     self.color_pipeline.setDescriptorBuffer(4, 0, scene.draw_indirect_buffer);
     self.color_pipeline.setDescriptorBuffer(7, 0, scene.point_light_buffer);
+    self.color_pipeline.setDescriptorImageSampler(8, 0, scene.environment_image, scene.environment_sampler);
 
     self.depth_pipeline.setDescriptorBuffer(1, 0, scene.transforms_buffer);
     self.depth_pipeline.setDescriptorBuffer(2, 0, scene.draw_indirect_buffer);

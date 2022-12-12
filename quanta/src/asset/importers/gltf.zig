@@ -30,6 +30,10 @@ pub const Import = struct
     {
         albedo: [4]f32,
         albedo_texture_index: u32, 
+        metalness: f32,
+        metalness_texture_index: u32,
+        roughness: f32,
+        roughness_texture_index: u32,
     };
 
     pub const Texture = struct 
@@ -392,14 +396,19 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
             {
                 const pbr = primitive.material.*.pbr_metallic_roughness;
 
-                const has_albedo = 
+                const has_albedo_texture = 
                     pbr.base_color_texture.texture != null and 
                     pbr.base_color_texture.texture.*.image != null and 
                     pbr.base_color_texture.texture.*.image.*.uri != null;
 
+                const has_roughness_texture = 
+                    pbr.metallic_roughness_texture.texture != null and
+                    pbr.metallic_roughness_texture.texture.*.image != null and 
+                    pbr.metallic_roughness_texture.texture.*.image.*.uri != null;
+
                 var albedo_index: ?u32 = null;
 
-                if (has_albedo)
+                if (has_albedo_texture)
                 {
                     for (gltf_images) |*gltf_image, i|
                     {
@@ -410,16 +419,34 @@ pub fn import(allocator: std.mem.Allocator, file_path: []const u8) !Import
                             break;
                         }
                     }
+                }
 
-                    //O(n), very bad code...
-                    // const albedo_index = std.mem.indexOf(cgltf.cgltf_image, gltf_images, &.{ pbr.base_color_texture.texture.*.image }) orelse unreachable;
+                var roughness_index: ?u32 = null;
+
+                if (has_roughness_texture)
+                {
+                    for (gltf_images) |*gltf_image, i|
+                    {
+                        if (gltf_image == pbr.metallic_roughness_texture.texture.*.image)
+                        {
+                            roughness_index = @intCast(u32, i) + 1;
+
+                            break;
+                        }
+                    }
                 }
 
                 material_index = @intCast(u32, materials.items.len);
 
+                std.log.info("Material {any}", .{ pbr });
+
                 try materials.append(.{
                     .albedo = pbr.base_color_factor,
                     .albedo_texture_index = albedo_index orelse 0,
+                    .roughness = pbr.roughness_factor,
+                    .roughness_texture_index = roughness_index orelse 0,
+                    .metalness = pbr.metallic_factor,
+                    .metalness_texture_index = 0,
                 });
             }
 

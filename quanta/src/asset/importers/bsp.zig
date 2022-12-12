@@ -370,6 +370,10 @@ pub fn convertToGltfImport(allocator: std.mem.Allocator, import_result: ImportRe
     gltf_import_data.materials[0] = .{
         .albedo = .{ 1, 1, 1, 1 },
         .albedo_texture_index = 0, 
+        .roughness = 1,
+        .roughness_texture_index = 0,
+        .metalness = 0,
+        .metalness_texture_index = 0,
     };
 
     gltf_import_data.sub_meshes = try allocator.alloc(std.meta.Child(@TypeOf(gltf_import_data.sub_meshes)), 1);

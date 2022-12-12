@@ -188,9 +188,9 @@ pub fn main() !void
                 if (material.albedo_texture_index != 0) test_scene_textures[material.albedo_texture_index - 1] else null,
                 material.albedo,
                 null,
-                0,
-                null,
-                1,
+                material.metalness,
+                if (material.roughness_texture_index != 0) test_scene_textures[material.roughness_texture_index - 1] else null,
+                material.roughness,
             );
         }
     }
@@ -225,6 +225,7 @@ pub fn main() !void
         .translation = .{ 0, 3, 12.5 },
         .target = .{ 0, 0, 0 },
         .fov = 60,
+        .exposure = 10,
     };
 
     var camera_position = @Vector(3, f32) { 8.7, 5.7, 0.9 };
@@ -237,6 +238,13 @@ pub fn main() !void
     var last_mouse_y: f32 = 0;
     var camera_enable = false;
     var camera_enable_changed = false;
+
+    var directional_light: Renderer3D.DirectionalLight = .{
+        .direction = .{ -0.5, -1, 0.2 },  
+        .diffuse = packUnorm4x8(.{ 0.45, 0.45, 0.45, 1 }),
+        .intensity = 1
+    };
+    var enable_directional_light: bool = true;
 
     const time_at_start = std.time.milliTimestamp();
 
@@ -333,11 +341,8 @@ pub fn main() !void
             try Renderer3D.beginSceneRender(
                 scene, 
                 &.{ Renderer3D.View { .camera = camera } },
-                .{ .diffuse = packUnorm4x8(.{ 0, 0, 0, 1 }) },
-                if (false) .{ 
-                    .direction = .{ -0.5, -1, 0.2 },  
-                    .diffuse = packUnorm4x8(.{ 0.15, 0.15, 0.15, 1 }),
-                } else null
+                .{ .diffuse = packUnorm4x8(.{ 0.005, 0.005, 0.005, 1 }) },
+                if (enable_directional_light) directional_light else null
             );
             defer Renderer3D.endSceneRender(scene);
 
@@ -418,6 +423,13 @@ pub fn main() !void
                         "geometry_pass_time = {d:.2}ms", 
                         .{ @intToFloat(f64, Renderer3D.getStatistics().geometry_pass_time) / @intToFloat(f64, std.time.ns_per_ms) }
                     );
+
+                    _ = imgui.igDragFloat("Camera Exposure: ", &camera.exposure, 0.1, 0.1, 15, null, 0);
+
+                    widgets.text("Directional Light: ");
+
+                    _ = imgui.igDragFloat3("Direction: ", &directional_light.direction[0], 0.05, -1, 1, null, 0);
+                    _ = imgui.igDragFloat("Intensity: ", &directional_light.intensity, 0.1, 0, 1, null, 0);
                 }
                 widgets.end();
 

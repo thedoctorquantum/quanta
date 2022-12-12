@@ -14,6 +14,7 @@ struct AmbientLight
 struct DirectionalLight 
 {
     vec3 direction;
+    float intensity;
     uint diffuse;
 };
 
@@ -68,6 +69,8 @@ layout(binding = 7, scalar) restrict readonly buffer PointLights
     PointLight point_lights[];
 };
 
+layout(binding = 8) uniform samplerCube environment_sampler;
+
 float distributionGGX(vec3 N, vec3 H, float roughness)
 {
     float a = roughness * roughness;
@@ -108,14 +111,70 @@ vec3 fresnelSchlick(float cos_theta, vec3 F0)
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cos_theta, 0.0, 1.0), 5.0);
 }  
 
-vec4 directionalLightContribution(DirectionalLight directional_light, vec3 normal, vec3 position, vec3 view_direction) 
+//Bidirectional Scattering Distribution function for the surface
+#if 0
+vec4 bsdf(
+    vec3 view_direction,
+    vec3 light_direction,
+    vec4 albedo,
+    float roughness,
+    float metallic,
+    vec3 F0,
+) 
+{
+    vec3 half_direction = normalize(view_direction + light_direction);
+    float n_dot_l = max(dot(normal, light_direction), 0.0);
+
+    vec3 kS = F;
+    vec3 kD = vec3(1.0) - kS;
+    kD *= 1.0 - metallic;	
+
+    vec3 diffuse = kD * albedo.rgb / PI; 
+
+    float NDF = distributionGGX(normal, half_direction, roughness);        
+    float G = geometrySmith(normal, view_direction, light_direction, roughness);      
+    vec3 F = fresnelSchlick(max(dot(half_direction, view_direction), 0.0), F0);       
+
+    vec3 numerator = NDF * G * F;
+    float denominator = 4.0 * max(dot(normal, view_direction), 0.0) * n_dot_l + 0.0001;
+    vec3 specular = numerator / denominator;  
+
+    return diffuse + specular;
+}
+#endif
+
+vec4 directionalLightContribution(
+    vec4 albedo,
+    float roughness,
+    float metallic,
+    vec3 F0,
+    DirectionalLight directional_light,
+    vec3 normal, 
+    vec3 position, 
+    vec3 view_direction
+) 
 {
     vec4 light_color = unpackUnorm4x8(directional_light.diffuse);
 
     vec3 light_direction = normalize(-directional_light.direction);
-    float diffuse_factor = max(dot(normal, light_direction), 0);
+    vec3 half_direction = normalize(view_direction + light_direction);
+    vec3 radiance = vec3(light_color);
 
-    return light_color * diffuse_factor; 
+    float NDF = distributionGGX(normal, half_direction, roughness);        
+    float G = geometrySmith(normal, view_direction, light_direction, roughness);      
+    vec3 F = fresnelSchlick(max(dot(half_direction, view_direction), 0.0), F0);       
+
+    vec3 kS = F;
+    vec3 kD = vec3(1.0) - kS;
+    kD *= 1.0 - metallic;	
+
+    float n_dot_l = max(dot(normal, light_direction), 0.0);
+
+    vec3 numerator = NDF * G * F;
+    float denominator = 4.0 * max(dot(normal, view_direction), 0.0) * n_dot_l + 0.0001;
+    vec3 specular = numerator / denominator;  
+
+    return vec4((kD * albedo.rgb / PI + specular) * vec3(1) * n_dot_l * directional_light.intensity, 0); 
 }
 
 vec4 pointLightContribution(
@@ -129,12 +188,15 @@ vec4 pointLightContribution(
     vec3 view_direction
 ) 
 {
+    //point lights are spheres with a radius of 1cm 
+    const float emitter_radius = 0.01;
+
     vec4 light_color = unpackUnorm4x8(point_light.diffuse);
 
     vec3 light_direction = normalize(point_light.position - position);
     vec3 half_direction = normalize(view_direction + light_direction);
     float light_distance = distance(position, point_light.position);
-    float attenuation = point_light.intensity / (light_distance * light_distance);
+    float attenuation = point_light.intensity / max(light_distance * light_distance, emitter_radius * emitter_radius);
     vec3 radiance = vec3(light_color) * attenuation;
 
     float NDF = distributionGGX(normal, half_direction, roughness);        
@@ -169,9 +231,10 @@ void main()
         albedo *= texture(samplers[nonuniformEXT(material.albedo_index)], in_data.uv);
     }
 
-    if (material.metalness_index != 0)
+    if (material.roughness_index != 0)
     {
-        metallic *= texture(samplers[nonuniformEXT(material.metalness_index)], in_data.uv).r;
+        metallic *= texture(samplers[nonuniformEXT(material.roughness_index)], in_data.uv).r;
+        roughness *= texture(samplers[nonuniformEXT(material.roughness_index)], in_data.uv).g;
     }
 
     vec4 ambient_light = unpackUnorm4x8(constants.ambient_light.diffuse); 
@@ -183,7 +246,16 @@ void main()
 
     if (constants.use_directional_light)
     {
-        light_color += directionalLightContribution(constants.directional_light, in_data.normal, in_data.position, constants.view_position);
+        light_color += directionalLightContribution(
+                albedo,
+                roughness,
+                metallic, 
+                F0, 
+                constants.directional_light, 
+                in_data.normal, 
+                in_data.position, 
+                view_direction
+        );
     }
 
     uint point_light_count = constants.point_light_count;
@@ -210,13 +282,7 @@ void main()
         }
     }
 
-    // output_color = albedo * (ambient_light + light_color);
     vec4 ambient = ambient_light * albedo;
-    output_color = (ambient + vec4(vec3(light_color), 0));
 
-    if (false)
-    {
-        output_color.xyz = output_color.xyz / (output_color.xyz + vec3(1));
-        output_color.xyz = pow(output_color.xyz, vec3(1 / 2.2));
-    }
+    output_color = ambient + vec4(vec3(light_color), 0);
 }
